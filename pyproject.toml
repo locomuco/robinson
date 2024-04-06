@@ -8,6 +8,12 @@ dependencies = [
     "RPi.GPIO",
     "opencv-python==4.8.0.76",
     "black>=24.3.0",
+    "speechrecognition>=3.10.3",
+    "pyaudio>=0.2.14",
+    "spidev>=3.6",
+    "gpiozero>=2.0.1",
+    "pvporcupine>=3.0.2",
+    "pvrecorder>=1.2.2",
 ]
 readme = "README.md"
 requires-python = ">= 3.8"
