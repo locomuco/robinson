@@ -81,7 +81,7 @@ MODEL = "gemini-2.0-flash-live-001"
 
 DEFAULT_MODE = "camera"
 
-client = genai.Client(http_options={"api_version": "v1beta"},api_key="AIzaSyAwNz1hCTiVZ9OJo6PSCXyfNUTOL9T3-wo")
+client = genai.Client(http_options={"api_version": "v1beta"},api_key="API key")
 
 CONFIG = {
     "response_modalities": ["AUDIO"],
