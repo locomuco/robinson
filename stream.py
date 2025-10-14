@@ -14,10 +14,7 @@
 # limitations under the License.
 import asyncio
 import base64
-import numpy as np
-import librosa
 import io
-import os
 import sys
 import traceback
 
@@ -31,7 +28,8 @@ import argparse
 from google import genai
 
 if sys.version_info < (3, 11, 0):
-    import taskgroup, exceptiongroup
+    import taskgroup 
+    import exceptiongroup
 
     asyncio.TaskGroup = taskgroup.TaskGroup
     asyncio.ExceptionGroup = exceptiongroup.ExceptionGroup
@@ -44,6 +42,7 @@ CHUNK_SIZE = 1024
 
 ALSA_DEVICE_STRING = "plughw:3,0"
 
+#MODEL = "gemini-2.5-flash-native-audio-preview-09-2025"
 MODEL = "gemini-2.0-flash-live-001"
 
 DEFAULT_MODE = "none"
@@ -55,7 +54,7 @@ CONFIG = {
     "system_instruction": {
             "role": "system",
 
-            "parts": [{"text": "You are a retro robot and your name is Robin"}]
+            "parts": [{"text": "You are a retro robot and your name is Robin with a Texan accent"}]
     }
 }
 
