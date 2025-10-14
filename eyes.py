@@ -64,7 +64,7 @@ if __name__ == "__main__":
     blink(0.08)
     time.sleep(0.4)
     look_left()
-    blink(0.08)
+    blink(0.4)
     time.sleep(0.6)
     look_right()
     time.sleep(0.7)
