@@ -12,39 +12,6 @@
 # WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
 # See the License for the specific language governing permissions and
 # limitations under the License.
-
-"""
-## Setup
-
-To install the dependencies for this script, run:
-
-``` 
-pip install google-genai opencv-python pyaudio pillow mss
-```
-
-Before running this script, ensure the `GOOGLE_API_KEY` environment
-variable is set to the api-key you obtained from Google AI Studio.
-
-Important: **Use headphones**. This script uses the system default audio
-input and output, which often won't include echo cancellation. So to prevent
-the model from interrupting itself it is important that you use headphones. 
-
-## Run
-
-To run the script:
-
-```
-python Get_started_LiveAPI.py
-```
-
-The script takes a video-mode flag `--mode`, this can be "camera", "screen", or "none".
-The default is "camera". To share your screen run:
-
-```
-python Get_started_LiveAPI.py --mode screen
-```
-"""
-
 import asyncio
 import base64
 import numpy as np
@@ -79,7 +46,7 @@ ALSA_DEVICE_STRING = "plughw:3,0"
 
 MODEL = "gemini-2.0-flash-live-001"
 
-DEFAULT_MODE = "camera"
+DEFAULT_MODE = "none"
 
 client = genai.Client(http_options={"api_version": "v1beta"},api_key="API key")
 
@@ -88,13 +55,11 @@ CONFIG = {
     "system_instruction": {
             "role": "system",
 
-            "parts": [{"text": "You are aretro robot and your name is Robin"}]
+            "parts": [{"text": "You are a retro robot and your name is Robin"}]
     }
-    #"parts": [{"text": "Your name is Robinson. You speak german. You are a retrofit robot in a CRT screen. You talk like a funny robot from the movie number 5"}]
 }
 
 pya = pyaudio.PyAudio()
-
 
 class AudioLoop:
     def __init__(self, video_mode=DEFAULT_MODE):
