@@ -40,11 +40,11 @@ Debug without talking: `uv run robinson --text` (type, Robinson speaks) or
 
 ## How it behaves
 
-- Gemma starts each reply with a mood tag — `[fröhlich]`, `[überrascht]`,
-  `[müde]` … — that sets the eye lids / gaze style **and** the piper speaker
-  of the emotional Thorsten voice. Tags never reach the TTS.
+- Each spoken sentence gets a mood from its wording ("leider" → traurig,
+  "Oh, wirklich?" → überrascht, "Super!" → fröhlich …) that sets the eye
+  lids / gaze style **and** the piper speaker of the emotional Thorsten voice.
 - Asking it to look somewhere ("schau nach links", "zwinker mal", "mach die
-  Augen zu") makes it emit action tags that the eye thread executes.
+  Augen zu") is recognised in what you said and executed by the eye thread.
 - Eye states follow the conversation: idle wandering + blinking, wide-open
   attentive while you speak, glancing up while thinking, lively while talking,
   eyes closed after 5 min of silence.
