@@ -1,0 +1,8 @@
+# third-party checkouts / binaries / models (fetched by setup.sh)
+whisper.cpp/
+piper/
+models/
+backup/
+.venv/
+__pycache__/
+*.pyc

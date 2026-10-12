@@ -1,18 +1,12 @@
 [project]
 name = "robinson"
 version = "0.1.0"
-description = "A friendly retro robot"
-readme = "README.md"
-requires-python = ">=3.12"
+description = "Local voice assistant: whisper.cpp + ollama + piper"
+requires-python = ">=3.11"
 dependencies = [
-    "adafruit-circuitpython-motor>=3.4.17",
-    "adafruit-circuitpython-pca9685>=3.4.19",
-    "board>=1.0",
-    "google-genai>=1.43.0",
-    "mss>=10.1.0",
-    "opencv-python>=4.11.0.86",
-    "pillow>=11.3.0",
-    "pyaudio>=0.2.14",
-    "rpi-gpio>=0.7.1",
-    "ruff>=0.14.0",
+    "sounddevice>=0.4.6",
+    "numpy>=1.24",
+    "httpx>=0.27",
+    "pyalsaaudio>=0.11.0",
+    "scipy>=1.17.1",
 ]
