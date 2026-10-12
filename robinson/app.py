@@ -24,6 +24,7 @@ import numpy as np
 
 from .config import Config
 from .eyes import ACTIONS, MOODS, Eyes, make_backend
+from .memory import forget_request, personal_fact
 
 log = logging.getLogger("robinson")
 
@@ -51,9 +52,14 @@ class Robinson:
         self.eyes = Eyes(make_backend(cfg.eyes), cfg.sleep_after_s)
 
         from .llm import Llm
+        from .memory import Memory
+        from .tools import make_tools
         from .tts import Tts
-        self.llm = Llm(cfg.path(cfg.llm_model), cfg.system_prompt, cfg.llm_threads,
-                       cfg.llm_max_tokens, cfg.llm_cache_dir)
+        self.memory = Memory(cfg.memory_file, on_forget=lambda: self.llm.start_fresh())
+        self.llm = Llm(cfg.path(cfg.llm_model),
+                       lambda: cfg.system_prompt + self.memory.prompt_section(),
+                       cfg.llm_threads, cfg.llm_max_tokens, cfg.llm_cache_dir,
+                       tools=make_tools(self.memory) if cfg.tools else None)
         self.audio = None
         if use_audio:
             from .audio import AudioIO
@@ -171,10 +177,19 @@ class Robinson:
                 self.eyes.set_state("idle")
                 continue
             self._play_filler(text)
+            self._update_memory(text)
             self.reply(text, t0)
             self.busy.clear()
             if not self.cancel.is_set():
                 self.eyes.set_state("idle")
+
+    def _update_memory(self, text: str) -> None:
+        """Deterministic remember/forget from the user's words (E2B often only
+        *claims* to have called merken/vergessen)."""
+        if what := forget_request(text):
+            self.memory.forget(what)
+        elif fact := personal_fact(text):
+            self.memory.add(fact)
 
     def _play_filler(self, text: str) -> None:
         kind = filler_kind(text)
@@ -189,13 +204,17 @@ class Robinson:
     def reply(self, text: str, t0: float | None = None) -> str:
         t0 = t0 or time.monotonic()
         mood, buf, spoken, first = "neutral", "", [], True
+        tagged_mood = False   # an explicit tag/emoji from the model wins over wording
         heard = text.lower()
         user_actions = {a for rx, a in _USER_ACTIONS if rx.search(heard)}
         for a in user_actions:
             self.eyes.action(a)
 
         def speak(sentence: str) -> None:
-            nonlocal first
+            nonlocal first, mood
+            if not tagged_mood:
+                mood = mood_of(sentence)
+                self.eyes.set_mood(mood)
             ts = time.monotonic()
             audio = self.tts.synth(sentence, mood)
             log.debug("tts %.2fs: %s", time.monotonic() - ts, sentence.strip()[:40])
@@ -223,7 +242,7 @@ class Robinson:
             if kind == "tag":
                 log.debug("tag [%s]", val)
                 if val in MOODS:
-                    mood = val
+                    mood, tagged_mood = val, True
                     self.eyes.set_mood(val)
                 elif val in ACTIONS and val not in user_actions:
                     self.eyes.action(val)
@@ -250,7 +269,8 @@ class Robinson:
         if self.cfg.boot_greeting:
             # also prefills the system prompt, so the first real answer is fast
             self.busy.set()
-            self.reply("(Du wurdest gerade eingeschaltet. Begrüße kurz in einem Satz.)")
+            self.reply("(Du wurdest gerade eingeschaltet. Begrüße kurz in einem Satz, "
+                       "ohne Werkzeuge.)")
             self.busy.clear()
         threading.Thread(target=self.respond_loop, name="responder", daemon=True).start()
         log.info("Robinson ready — sprich mit mir.")
@@ -262,6 +282,7 @@ class Robinson:
         if self.audio:
             self.audio.start()
         for line in sys.stdin:
+            self._update_memory(line)
             if line.strip():
                 self.eyes.set_state("thinking")
                 print("Robinson:", self.reply(line.strip()), flush=True)
@@ -284,6 +305,23 @@ _GREETING = re.compile(r"^(hallo|hi|hey|servus|moin|guten (morgen|tag|abend)|tsc
 _SHORT_REPLY = re.compile(r"^(danke|ja|nein|okay|ok|stopp?|genau|super)\b")
 _QUESTION = re.compile(r"\?\s*$|^(wer|wie|was|wo|wann|warum|wieso|weshalb|welche\w*|"
                        r"kannst|könntest|hast|bist|weißt|erzähl|erklär|sag)\b")
+
+
+# mood per spoken sentence, from its wording (picks eye shape + piper speaker)
+_MOOD_RULES = [
+    ("traurig",      re.compile(r"\b(leider|schade|traurig|tut mir leid|bedauer)")),
+    ("überrascht",   re.compile(r"\b(oh|wow|wirklich\?|echt\?|ach was|tatsächlich)\b")),
+    ("müde",         re.compile(r"\b(müde|gähn|schlaf|gute nacht)")),
+    ("flüsternd",    re.compile(r"\b(psst|pst|geheimnis|flüster)")),
+    ("verärgert",    re.compile(r"\b(ärger|frechheit|unverschämt|grr)")),
+    ("nachdenklich", re.compile(r"\b(hmm|vielleicht|überleg|ich glaube|keine ahnung)")),
+    ("fröhlich",     re.compile(r"!|\b(haha|super|toll|klar|gerne|prima|juhu|cool|schön)")),
+]
+
+
+def mood_of(sentence: str) -> str:
+    t = sentence.lower()
+    return next((m for m, rx in _MOOD_RULES if rx.search(t)), "neutral")
 
 
 def filler_kind(text: str) -> str | None:

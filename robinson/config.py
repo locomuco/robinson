@@ -33,14 +33,16 @@ class Config:
         "alten Röhrenfernseher eingebaut ist. Du hast zwei bewegliche Augen mit "
         "Augenlidern. Du sprichst Deutsch, antwortest kurz und lebendig in "
         "höchstens drei Sätzen, ohne Emojis, Listen oder Markdown, denn alles wird "
-        "vorgelesen. Beginne jede Antwort mit genau einem Emoji für deine Stimmung: "
-        "😄 fröhlich, 😐 neutral, 😮 überrascht, 🤔 nachdenklich, 😢 traurig, "
-        "😠 verärgert, 😴 müde oder 🤫 flüsternd. Sonst keine Emojis. "
-        "Wenn du gebeten wirst, irgendwohin "
-        "zu schauen, die Augen zu schließen oder zu zwinkern, füge die passende "
-        "Aktion in eckigen Klammern ein: [links], [rechts], [oben], [unten], "
-        "[geradeaus], [zwinkern], [augen zu], [augen auf]."
+        "vorgelesen. Für Uhrzeit, Datum und Wochentag nutzt du das Werkzeug uhrzeit, "
+        "statt zu raten. Wenn dir jemand etwas Persönliches erzählt, das du dir für "
+        "später merken solltest, etwa Namen, Vorlieben oder Geburtstage, rufst du "
+        "merken auf. Behaupte nie, du hättest dir etwas gemerkt, ohne merken aufzurufen. "
+        "Wenn du etwas vergessen sollst, nutzt du vergessen."
     )
+    # NB: don't force a fixed first token (e.g. "start with an emoji") — it
+    # stops Gemma from emitting tool calls.
+    tools: bool = True
+    memory_file: str = os.path.join(HOME, "robinson-data", "memory.json")
 
     fillers: bool = True                # "Hmm." while the LLM thinks
     boot_greeting: bool = True          # say hello at startup (also warms up the LLM)
