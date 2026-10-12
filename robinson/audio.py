@@ -98,6 +98,7 @@ class AudioIO:
             channels=(1, out_ch), dtype="float32", callback=self._callback,
             latency="high")              # survive LLM prefill bursts on all cores
         self._dec_mic, self._dec_ref = _Decimator(rate // SR), _Decimator(rate // SR)
+        self._raw_peak = 0.0
         self._stop = threading.Event()
         self._worker = threading.Thread(target=self._process, name="audio", daemon=True)
 
@@ -121,6 +122,11 @@ class AudioIO:
             self._out.clear()
             self._out_pos = 0
             self.drained.set()
+
+    def raw_peak(self) -> float:
+        """Max block RMS of the raw mic (before AEC) since the last call."""
+        p, self._raw_peak = self._raw_peak, 0.0
+        return p
 
     @property
     def playing(self) -> bool:
@@ -163,6 +169,7 @@ class AudioIO:
                 mic, ref = self._raw.get(timeout=0.5)
             except queue.Empty:
                 continue
+            self._raw_peak = max(self._raw_peak, float(np.sqrt(np.mean(mic ** 2))))
             mic_buf = np.concatenate([mic_buf, self._dec_mic(mic)])
             ref_buf = np.concatenate([ref_buf, self._dec_ref(ref)])
             while len(mic_buf) >= FRAME and len(ref_buf) >= FRAME:

@@ -11,6 +11,7 @@ TTS for one utterance at a time).
 
 import argparse
 import logging
+import os
 import queue
 import re
 import signal
@@ -85,6 +86,7 @@ class Robinson:
     # ── listener: VAD + barge-in ─────────────────────────────────────────────
     def listen(self) -> None:
         speech_since = None
+        meter_t, meter_peak, meter_speech = time.monotonic(), 0.0, 0
         while not self.stop.is_set():
             try:
                 frame = self.audio.mic.get(timeout=0.5)
@@ -92,6 +94,14 @@ class Robinson:
                 continue
             self.vad.accept_waveform(frame)
             speaking = self.vad.is_speech_detected()
+
+            if log.isEnabledFor(logging.DEBUG):
+                meter_peak = max(meter_peak, float(np.sqrt(np.mean(frame ** 2))))
+                meter_speech += speaking
+                if time.monotonic() - meter_t >= 2.0:
+                    log.debug("mic rms max %.4f (raw %.4f), speech frames %d",
+                              meter_peak, self.audio.raw_peak(), meter_speech)
+                    meter_t, meter_peak, meter_speech = time.monotonic(), 0.0, 0
 
             if not self.busy.is_set():
                 self.eyes.set_state("listening" if speaking else "idle")
@@ -237,7 +247,8 @@ def main() -> None:
     ap.add_argument("--no-audio", action="store_true", help="with --text: print only")
     ap.add_argument("-v", "--verbose", action="store_true")
     args = ap.parse_args()
-    logging.basicConfig(level=logging.DEBUG if args.verbose else logging.INFO,
+    verbose = args.verbose or os.environ.get("ROBINSON_DEBUG", "") not in ("", "0")
+    logging.basicConfig(level=logging.DEBUG if verbose else logging.INFO,
                         format="%(asctime)s %(name)s %(levelname)s %(message)s")
     cfg = Config.from_env()
     bot = Robinson(cfg, use_audio=not args.no_audio)

@@ -34,17 +34,24 @@ class Llm:
         self.system_prompt = system_prompt
         self.max_tokens = max_tokens
         self._lock = threading.Lock()
+        self.history: list[dict] = []     # mirror of the conversation, for rebuilds
+        self._cancelled = False
         self.conv = None
         self.reset()
         log.info("LLM ready in %.1fs", time.monotonic() - t0)
 
-    def reset(self) -> None:
+    def reset(self, keep: int = 0) -> None:
+        """New conversation, replaying the last `keep` messages of history."""
         if self.conv is not None:
             self.conv.close()
-        self.conv = self.engine.create_conversation(system_message=self.system_prompt)
+        self.history = self.history[-keep:] if keep else []
+        self.conv = self.engine.create_conversation(
+            system_message=self.system_prompt, messages=self.history or None)
+        self._cancelled = False
 
     def cancel(self) -> None:
         """Abort the reply being generated (barge-in). Safe from any thread."""
+        self._cancelled = True
         try:
             self.conv.cancel_process()
         except Exception as e:
@@ -53,22 +60,33 @@ class Llm:
     def chat(self, text: str) -> Iterator[tuple[str, str]]:
         """Stream a reply as ("text", chunk) and ("tag", name) events."""
         with self._lock:
-            # leave room for the next exchange; start fresh rather than overflow
-            if self.conv.token_count > self.max_tokens - 512:
+            if self._cancelled:
+                # a cancelled LiteRT conversation stays dead: rebuild it from history
+                self.reset(keep=len(self.history))
+            elif self.conv.token_count > self.max_tokens - 512:
+                # leave room for the next exchange; keep only the recent turns
                 log.info("context full — starting a new conversation")
-                self.reset()
+                self.reset(keep=4)
+            self.history.append({"role": "user", "content": text})
+            reply = ""
             buf = ""
-            for chunk in self.conv.send_message_async(text):
-                buf += "".join(c.get("text", "") for c in chunk.get("content", [])
-                               if c.get("type", "text") == "text")
-                # hold back a possibly unfinished "[..." so tags are never split
-                cut = buf.rfind("[")
-                if cut != -1 and "]" not in buf[cut:] and len(buf) - cut <= 20:
-                    ready, buf = buf[:cut], buf[cut:]
-                else:
-                    ready, buf = buf, ""
-                yield from _split_tags(ready)
-            yield from _split_tags(buf)
+            try:
+                for chunk in self.conv.send_message_async(text):
+                    piece = "".join(c.get("text", "") for c in chunk.get("content", [])
+                                    if c.get("type", "text") == "text")
+                    reply += piece
+                    buf += piece
+                    # hold back a possibly unfinished "[..." so tags are never split
+                    cut = buf.rfind("[")
+                    if cut != -1 and "]" not in buf[cut:] and len(buf) - cut <= 20:
+                        ready, buf = buf[:cut], buf[cut:]
+                    else:
+                        ready, buf = buf, ""
+                    yield from _split_tags(ready)
+                yield from _split_tags(buf)
+            finally:
+                # also on barge-in: the model should know what it already said
+                self.history.append({"role": "assistant", "content": reply.strip() or "…"})
 
 
 def _split_tags(s: str) -> Iterator[tuple[str, str]]:
