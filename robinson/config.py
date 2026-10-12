@@ -73,6 +73,8 @@ class Config:
     tts_length_scale: float = 0.9
     tts_noise_scale: float = 0.8
     tts_noise_w_scale: float = 0.9
+    tts_pitch: float = 1.04             # voice colour: <1 deeper/fuller, >1 higher/younger
+    tts_tone: str = "neutral"           # EQ: neutral | warm | hell
     tts_robot: str = "aus"              # robot voice effect: aus | leicht | mittel | stark
 
     # ── eyes ─────────────────────────────────────────────────────────────────

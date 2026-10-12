@@ -6,13 +6,10 @@ single-speaker voices ignore the mood.
 
 import logging
 import re
-from math import gcd
-
 import numpy as np
 from piper import PiperVoice, SynthesisConfig
-from scipy.signal import resample_poly
 
-from . import robotfx
+from . import robotfx, voicefx
 
 log = logging.getLogger("robinson.tts")
 
@@ -28,13 +25,16 @@ _CLEAN = re.compile(r"[*_#`~>|]+")
 
 class Tts:
     def __init__(self, voice_path: str, out_rate: int, length_scale=0.9,
-                 noise_scale=0.8, noise_w_scale=0.9, robot: str = "aus"):
+                 noise_scale=0.8, noise_w_scale=0.9, robot: str = "aus",
+                 pitch: float = 1.0, tone: str = "neutral"):
         self.voice = PiperVoice.load(voice_path)
         self.multi = self.voice.config.num_speakers > 1
         self.out_rate = out_rate
         self.robot = robot
+        self.pitch, self.tone = pitch, tone
         mono = robotfx.monotone_factor(robot)   # robots speak flatter
-        self.kw = dict(length_scale=length_scale, noise_scale=noise_scale * mono,
+        # pitch shift speeds the audio up by `pitch`; synthesize slower to compensate
+        self.kw = dict(length_scale=length_scale * pitch, noise_scale=noise_scale * mono,
                        noise_w_scale=noise_w_scale * mono)
         log.info("TTS voice %s (%d speakers)", voice_path.rsplit("/", 1)[-1],
                  self.voice.config.num_speakers)
@@ -50,8 +50,6 @@ class Tts:
         if not chunks:
             return None
         audio = np.concatenate([c.audio_float_array for c in chunks]).astype(np.float32)
-        src = chunks[0].sample_rate
-        if src != self.out_rate:
-            g = gcd(src, self.out_rate)
-            audio = resample_poly(audio, self.out_rate // g, src // g).astype(np.float32)
+        audio = voicefx.resample(audio, chunks[0].sample_rate, self.out_rate, self.pitch)
+        audio = voicefx.tone(audio, self.out_rate, self.tone)
         return robotfx.apply(audio, self.out_rate, self.robot)
