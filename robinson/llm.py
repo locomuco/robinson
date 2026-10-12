@@ -54,7 +54,7 @@ class Llm:
         """Stream a reply as ("text", chunk) and ("tag", name) events."""
         with self._lock:
             # leave room for the next exchange; start fresh rather than overflow
-            if self.conv.token_count() > self.max_tokens - 512:
+            if self.conv.token_count > self.max_tokens - 512:
                 log.info("context full — starting a new conversation")
                 self.reset()
             buf = ""

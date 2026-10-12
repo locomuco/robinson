@@ -27,6 +27,19 @@ log = logging.getLogger("robinson")
 
 # sentence end; the first chunk may also end at a comma to start talking sooner
 _SENT_END = re.compile(r"(?<=[.!?…])\s+")
+
+# eye commands recognised directly in what the user said — reliable and
+# instant, independent of whether the model remembers to emit an action tag
+_USER_ACTIONS = [
+    (re.compile(r"\bnach links\b|\blinks (schauen|gucken|sehen)"), "links"),
+    (re.compile(r"\bnach rechts\b|\brechts (schauen|gucken|sehen)"), "rechts"),
+    (re.compile(r"\bnach oben\b"), "oben"),
+    (re.compile(r"\bnach unten\b"), "unten"),
+    (re.compile(r"\b(geradeaus|mich an)\b"), "geradeaus"),
+    (re.compile(r"\bzwinker"), "zwinkern"),
+    (re.compile(r"\baugen (zu|schließen)|\bschließ\w* (die|deine) augen"), "augen zu"),
+    (re.compile(r"\baugen (auf|öffnen)|\bmach\w* (die|deine) augen auf|\bwach auf"), "augen auf"),
+]
 _FIRST_CUT = re.compile(r"(?<=[,;:])\s+")
 
 
@@ -136,10 +149,16 @@ class Robinson:
     def reply(self, text: str, t0: float | None = None) -> str:
         t0 = t0 or time.monotonic()
         mood, buf, spoken, first = "neutral", "", [], True
+        heard = text.lower()
+        user_actions = {a for rx, a in _USER_ACTIONS if rx.search(heard)}
+        for a in user_actions:
+            self.eyes.action(a)
 
         def speak(sentence: str) -> None:
             nonlocal first
+            ts = time.monotonic()
             audio = self.tts.synth(sentence, mood)
+            log.debug("tts %.2fs: %s", time.monotonic() - ts, sentence.strip()[:40])
             if audio is None or self.cancel.is_set():
                 return
             if first:
@@ -151,16 +170,21 @@ class Robinson:
                 self.audio.play(audio)
 
         stream = self.llm.chat(text)
+        t_tok = None
         for kind, val in stream:
+            if t_tok is None:
+                t_tok = time.monotonic()
+                log.debug("first LLM token after %.2fs", t_tok - t0)
             if self.cancel.is_set():
                 for _ in stream:  # let the cancelled generation wind down cleanly
                     pass
                 break
             if kind == "tag":
+                log.debug("tag [%s]", val)
                 if val in MOODS:
                     mood = val
                     self.eyes.set_mood(val)
-                elif val in ACTIONS:
+                elif val in ACTIONS and val not in user_actions:
                     self.eyes.action(val)
                 continue
             buf += val

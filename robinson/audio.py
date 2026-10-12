@@ -75,7 +75,7 @@ class AudioIO:
     def __init__(self, device: str, rate: int = 48_000, aec: bool = True,
                  aec_delay_ms: int = 60, gain: float = 1.0):
         self.rate = rate
-        self.block = rate // 100                  # 10 ms device blocks
+        self.block = rate // 50                   # 20 ms device blocks
         self.gain = gain
         self.mic: queue.Queue[np.ndarray] = queue.Queue(maxsize=3000)  # 30 s
         self._raw: queue.Queue = queue.Queue(maxsize=500)
@@ -96,7 +96,7 @@ class AudioIO:
         self.stream = sd.Stream(
             device=(dev, dev), samplerate=rate, blocksize=self.block,
             channels=(1, out_ch), dtype="float32", callback=self._callback,
-            latency="low")
+            latency="high")              # survive LLM prefill bursts on all cores
         self._dec_mic, self._dec_ref = _Decimator(rate // SR), _Decimator(rate // SR)
         self._stop = threading.Event()
         self._worker = threading.Thread(target=self._process, name="audio", daemon=True)
