@@ -17,6 +17,10 @@ import litert_lm as lm
 log = logging.getLogger("robinson.llm")
 
 _TAG = re.compile(r"\[([^\[\]]{1,20})\]")
+# mood emojis are one token each (vs 4-6 for "[fröhlich]") — ~0.4 s earlier speech
+EMOJI_MOOD = {"😄": "fröhlich", "😐": "neutral", "😮": "überrascht", "🤔": "nachdenklich",
+              "😢": "traurig", "😠": "verärgert", "😴": "müde", "🤫": "flüsternd"}
+_EMOJI = re.compile("[\U0001F300-\U0001FAFF\u2600-\u27BF\uFE0F\u200D]")
 
 
 class Llm:
@@ -90,6 +94,10 @@ class Llm:
 
 
 def _split_tags(s: str) -> Iterator[tuple[str, str]]:
+    for e in _EMOJI.findall(s):
+        if e in EMOJI_MOOD:
+            yield "tag", EMOJI_MOOD[e]
+    s = _EMOJI.sub("", s)    # never let piper see emojis
     pos = 0
     for m in _TAG.finditer(s):
         if m.start() > pos:

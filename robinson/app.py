@@ -231,6 +231,11 @@ class Robinson:
     def run(self) -> None:
         self.eyes.start()
         self.audio.start()
+        if self.cfg.boot_greeting:
+            # also prefills the system prompt, so the first real answer is fast
+            self.busy.set()
+            self.reply("(Du wurdest gerade eingeschaltet. Begrüße kurz in einem Satz.)")
+            self.busy.clear()
         threading.Thread(target=self.respond_loop, name="responder", daemon=True).start()
         log.info("Robinson ready — sprich mit mir.")
         self.listen()

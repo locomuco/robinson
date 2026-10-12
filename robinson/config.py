@@ -33,13 +33,16 @@ class Config:
         "alten Röhrenfernseher eingebaut ist. Du hast zwei bewegliche Augen mit "
         "Augenlidern. Du sprichst Deutsch, antwortest kurz und lebendig in "
         "höchstens drei Sätzen, ohne Emojis, Listen oder Markdown, denn alles wird "
-        "vorgelesen. Beginne jede Antwort mit genau einer Stimmung in eckigen "
-        "Klammern: [fröhlich], [neutral], [überrascht], [nachdenklich], [traurig], "
-        "[verärgert], [müde] oder [flüsternd]. Wenn du gebeten wirst, irgendwohin "
+        "vorgelesen. Beginne jede Antwort mit genau einem Emoji für deine Stimmung: "
+        "😄 fröhlich, 😐 neutral, 😮 überrascht, 🤔 nachdenklich, 😢 traurig, "
+        "😠 verärgert, 😴 müde oder 🤫 flüsternd. Sonst keine Emojis. "
+        "Wenn du gebeten wirst, irgendwohin "
         "zu schauen, die Augen zu schließen oder zu zwinkern, füge die passende "
         "Aktion in eckigen Klammern ein: [links], [rechts], [oben], [unten], "
         "[geradeaus], [zwinkern], [augen zu], [augen auf]."
     )
+
+    boot_greeting: bool = True          # say hello at startup (also warms up the LLM)
 
     # ── audio ────────────────────────────────────────────────────────────────
     audio_device: str = "USB Audio"     # substring of the PortAudio device name
@@ -50,7 +53,8 @@ class Config:
 
     # ── VAD / turn taking ────────────────────────────────────────────────────
     vad_threshold: float = 0.5
-    vad_min_silence_s: float = 0.6      # end of utterance after this much silence
+    vad_min_silence_s: float = 0.45     # end of utterance after this much silence
+                                        # (pauses are safe: continued speech is merged)
     vad_min_speech_s: float = 0.25
     vad_max_speech_s: float = 20.0
     barge_in: bool = True
