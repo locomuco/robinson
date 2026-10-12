@@ -51,6 +51,32 @@ Debug without talking: `uv run robinson --text` (type, Robinson speaks) or
 - Talking over Robinson interrupts it (barge-in); echo cancellation keeps its
   own voice from triggering that.
 
+## Local or online brain
+
+Robinson runs fully offline on Gemma 4 E2B by default. It can instead use
+Claude through **Claude Code with your own Claude subscription** — same
+persona, same tools (`uhrzeit`, `merken`, `vergessen`), same `memory.json`:
+
+```bash
+curl -fsSL https://claude.ai/install.sh | bash        # on the Pi
+claude setup-token                                    # on a machine with a browser
+# robinson.env on the Pi (chmod 600):
+#   CLAUDE_CODE_OAUTH_TOKEN=…
+#   ROBINSON_LLM=online
+#   ROBINSON_ONLINE_MODEL=haiku                       # or sonnet
+sudo systemctl restart robinson
+```
+
+One `claude -p` process stays alive in stream-json mode; Robinson's tools are
+served to it by `python -m robinson.mcp_tools`. If the online backend can't
+start (no network, bad token) Robinson falls back to the local model.
+Measured on the Pi: Haiku ~0.65 s to first word (local Gemma ~1.1 s).
+
+This is personal use of the unmodified Claude Code binary with your own
+subscription — don't share the robot's token with others; usage counts
+against your normal Claude limits. For anything beyond personal use, use an
+API key instead.
+
 ## Configuration
 
 All knobs live in `robinson/config.py`; override any of them with

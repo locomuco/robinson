@@ -13,6 +13,11 @@ HOME = os.path.expanduser("~")
 
 @dataclasses.dataclass
 class Config:
+    # ── LLM backend ──────────────────────────────────────────────────────────
+    llm: str = "local"                  # local (Gemma on the Pi) | online (Claude Code)
+    online_model: str = "haiku"         # haiku | sonnet | full model name
+    online_thinking: bool = False       # extended thinking: +0.2-0.4 s to first word
+
     # ── models ───────────────────────────────────────────────────────────────
     models_dir: str = os.path.join(HOME, "robinson-models")
     llm_model: str = "gemma-4-E2B-it.litertlm"

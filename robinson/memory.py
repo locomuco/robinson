@@ -60,13 +60,19 @@ class Memory:
         self.max_facts = max_facts
         self._lock = threading.Lock()
         self.facts: list[dict] = []
-        if os.path.exists(path):
-            try:
-                with open(path) as f:
-                    self.facts = json.load(f)
-            except (OSError, json.JSONDecodeError) as e:
-                log.warning("could not read %s: %s", path, e)
+        self.reload()
         log.info("memory: %d facts", len(self.facts))
+
+    def reload(self) -> None:
+        """Re-read the file (another process — the MCP tool server — may have written it)."""
+        if os.path.exists(self.path):
+            try:
+                with open(self.path) as f:
+                    facts = json.load(f)
+                with self._lock:
+                    self.facts = facts
+            except (OSError, json.JSONDecodeError) as e:
+                log.warning("could not read %s: %s", self.path, e)
 
     def _save(self) -> None:
         os.makedirs(os.path.dirname(self.path), exist_ok=True)

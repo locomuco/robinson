@@ -51,15 +51,10 @@ class Robinson:
         self.cfg = cfg
         self.eyes = Eyes(make_backend(cfg.eyes), cfg.sleep_after_s)
 
-        from .llm import Llm
         from .memory import Memory
-        from .tools import make_tools
         from .tts import Tts
         self.memory = Memory(cfg.memory_file, on_forget=lambda: self.llm.start_fresh())
-        self.llm = Llm(cfg.path(cfg.llm_model),
-                       lambda: cfg.system_prompt + self.memory.prompt_section(),
-                       cfg.llm_threads, cfg.llm_max_tokens, cfg.llm_cache_dir,
-                       tools=make_tools(self.memory) if cfg.tools else None)
+        self.llm = self._make_llm()
         self.audio = None
         if use_audio:
             from .audio import AudioIO
@@ -83,6 +78,36 @@ class Robinson:
         self.merge_next = False              # user kept talking before we answered
         self._prev_seg = np.zeros(0, np.float32)
         self.stop = threading.Event()
+
+    def _make_llm(self):
+        """Selected backend; online falls back to local if it can't start."""
+        cfg = self.cfg
+        prompt = lambda: cfg.system_prompt + self.memory.prompt_section()  # noqa: E731
+        if cfg.llm == "online":
+            try:
+                from .llm_online import ClaudeCodeLlm
+                llm = ClaudeCodeLlm(prompt, cfg.online_model, cfg.memory_file,
+                                    on_tool=self._on_online_tool,
+                                    thinking=cfg.online_thinking)
+                # first turn proves auth + network; doubles as connection warm-up
+                if not "".join(v for k, v in llm.chat("Antworte nur mit: ok") if k == "text"):
+                    raise RuntimeError("empty reply")
+                llm.reset()
+                return llm
+            except Exception as e:
+                log.error("online LLM unavailable (%s) — falling back to local", e)
+        from .llm import LocalLlm
+        from .tools import make_tools
+        return LocalLlm(cfg.path(cfg.llm_model), prompt, cfg.llm_threads,
+                        cfg.llm_max_tokens, cfg.llm_cache_dir,
+                        tools=make_tools(self.memory) if cfg.tools else None)
+
+    def _on_online_tool(self, name: str, _input: dict) -> None:
+        # the MCP server wrote memory.json in its own process
+        if name in ("merken", "vergessen"):
+            self.memory.reload()
+        if name == "vergessen":
+            self.llm.start_fresh()
 
     def _make_vad(self):
         import sherpa_onnx
@@ -186,6 +211,8 @@ class Robinson:
     def _update_memory(self, text: str) -> None:
         """Deterministic remember/forget from the user's words (E2B often only
         *claims* to have called merken/vergessen)."""
+        if self.llm.name != "local":
+            return   # Claude calls merken/vergessen reliably; only Gemma needs this net
         if what := forget_request(text):
             self.memory.forget(what)
         elif fact := personal_fact(text):
@@ -290,6 +317,8 @@ class Robinson:
 
     def close(self) -> None:
         self.stop.set()
+        if hasattr(self.llm, "close"):
+            self.llm.close()
         self.eyes.stop()
         if self.audio:
             self.audio.close()
