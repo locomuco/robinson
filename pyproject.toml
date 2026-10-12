@@ -1,12 +1,35 @@
 [project]
 name = "robinson"
-version = "0.1.0"
-description = "Local voice assistant: whisper.cpp + ollama + piper"
+version = "0.2.0"
+description = "Offline German voice robot with servo eyes (Raspberry Pi 5)"
+readme = "README.md"
 requires-python = ">=3.11"
 dependencies = [
-    "sounddevice>=0.4.6",
-    "numpy>=1.24",
-    "httpx>=0.27",
-    "pyalsaaudio>=0.11.0",
-    "scipy>=1.17.1",
+    "litert-lm>=0.18",
+    "sherpa-onnx>=1.13",
+    "sherpa-onnx-core>=1.13",                # native libs incl. libonnxruntime (not pulled on aarch64)
+    "piper-tts>=1.8",
+    "sounddevice>=0.5",
+    "numpy>=2.0",
+    "scipy>=1.14",
+    "livekit>=1.0",                          # WebRTC AEC (AudioProcessingModule)
+    "adafruit-circuitpython-servokit>=1.3",
+    "adafruit-blinka>=8.50",
+    "rpi-lgpio>=0.6; platform_machine == 'aarch64'",  # RPi.GPIO shim for the Pi 5
 ]
+
+[project.optional-dependencies]
+whisper = ["pywhispercpp>=1.5"]
+
+[project.scripts]
+robinson = "robinson.app:main"
+
+[build-system]
+requires = ["hatchling"]
+build-backend = "hatchling.build"
+
+[tool.hatch.build.targets.wheel]
+packages = ["robinson"]
+
+[tool.ruff]
+line-length = 100

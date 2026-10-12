@@ -1,134 +1,58 @@
 #!/usr/bin/env bash
-# Robinson setup script — Raspberry Pi 5 / Ubuntu aarch64
-# Installs: uv · ollama · whisper.cpp · piper
+# Robinson setup — Raspberry Pi 5, Raspberry Pi OS Lite (trixie, arm64).
+# Installs system deps, the Python env (uv), all models, enables I2C and the
+# systemd service. Safe to re-run.
 set -euo pipefail
 
-SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
-cd "$SCRIPT_DIR"
+cd "$(dirname "${BASH_SOURCE[0]}")"
+ROOT=$PWD
+MODELS=${ROBINSON_MODELS_DIR:-$HOME/robinson-models}
+export PATH="$HOME/.local/bin:$PATH"
 
-OLLAMA_MODEL="qwen2.5:1.5b"
-WHISPER_MODEL="base.en"
-PIPER_RELEASE="2023.11.14-2"
-PIPER_VOICE_NAME="en_US-lessac-medium"
-PIPER_HF_BASE="https://huggingface.co/rhasspy/piper-voices/resolve/v1.0.0/en/en_US/lessac/medium"
+step() { echo -e "\n\033[0;32m=== $* ===\033[0m"; }
+fetch() {  # url dest — skip if present
+    [ -s "$2" ] && return 0
+    echo "→ $(basename "$2")"
+    curl -fL --progress-bar -o "$2.part" "$1" && mv "$2.part" "$2"
+}
 
-GREEN='\033[0;32m'
-YELLOW='\033[1;33m'
-NC='\033[0m'
-
-step() { echo -e "\n${GREEN}=== $* ===${NC}"; }
-info() { echo -e "${YELLOW}→ $*${NC}"; }
-
-# ── 1. System dependencies ────────────────────────────────────────────────────
-step "System dependencies"
+step "System packages"
 sudo apt-get update -qq
-sudo apt-get install -y -qq \
-    cmake \
-    build-essential \
-    git \
-    wget \
-    curl \
-    portaudio19-dev \
-    libsndfile1-dev \
-    python3-dev
+sudo apt-get install -y -qq curl ca-certificates libportaudio2 libsndfile1 alsa-utils \
+    i2c-tools python3-dev build-essential cmake swig liblgpio-dev
 
-# ── 2. uv ─────────────────────────────────────────────────────────────────────
-step "uv (Python package manager)"
-if ! command -v uv &>/dev/null; then
-    curl -LsSf https://astral.sh/uv/install.sh | sh
-    # Make uv available for the rest of this script
-    export PATH="$HOME/.cargo/bin:$HOME/.local/bin:$PATH"
-    info "uv installed — you may need to restart your shell or run: source ~/.bashrc"
-else
-    info "uv already installed: $(uv --version)"
+step "I2C (PCA9685 servo driver)"
+if ! grep -q '^dtparam=i2c_arm=on' /boot/firmware/config.txt; then
+    sudo raspi-config nonint do_i2c 0
+    echo "I2C enabled — reboot required before the servos work"
 fi
+sudo usermod -aG i2c,audio,gpio "$USER"
 
-# ── 3. ollama ─────────────────────────────────────────────────────────────────
-step "ollama"
-if ! command -v ollama &>/dev/null; then
-    curl -fsSL https://ollama.com/install.sh | sh
-else
-    info "ollama already installed"
-fi
-
-# Start ollama in background if not already running
-if ! pgrep -x ollama &>/dev/null; then
-    info "Starting ollama server …"
-    ollama serve &>/tmp/ollama.log &
-    OLLAMA_PID=$!
-    # Wait for it to be ready
-    for i in $(seq 1 20); do
-        if curl -sf http://localhost:11434/api/tags &>/dev/null; then break; fi
-        sleep 1
-    done
-else
-    info "ollama already running"
-fi
-
-info "Pulling model: $OLLAMA_MODEL"
-ollama pull "$OLLAMA_MODEL"
-
-# ── 4. whisper.cpp ────────────────────────────────────────────────────────────
-step "whisper.cpp"
-if [ ! -d "whisper.cpp" ]; then
-    info "Cloning whisper.cpp …"
-    git clone https://github.com/ggerganov/whisper.cpp --depth 1
-fi
-
-info "Building whisper.cpp (this takes ~5 min on Pi 5) …"
-cmake -S whisper.cpp -B whisper.cpp/build \
-    -DWHISPER_BUILD_EXAMPLES=ON \
-    -DCMAKE_BUILD_TYPE=Release \
-    -DGGML_NATIVE=OFF          # aarch64: don't require AVX etc.
-cmake --build whisper.cpp/build --config Release -j"$(nproc)"
-
-info "Downloading whisper model: $WHISPER_MODEL"
-if [ ! -f "whisper.cpp/models/ggml-${WHISPER_MODEL}.bin" ]; then
-    bash whisper.cpp/models/download-ggml-model.sh "$WHISPER_MODEL"
-else
-    info "Model already present"
-fi
-
-# ── 5. piper ──────────────────────────────────────────────────────────────────
-step "piper TTS"
-if [ ! -d "piper" ]; then
-    info "Downloading piper binary …"
-    mkdir piper
-    PIPER_TGZ="piper_linux_aarch64.tar.gz"
-    wget -q --show-progress \
-        "https://github.com/rhasspy/piper/releases/download/${PIPER_RELEASE}/${PIPER_TGZ}" \
-        -O "/tmp/${PIPER_TGZ}"
-    # Tarball contains a top-level 'piper/' folder — strip it
-    tar xzf "/tmp/${PIPER_TGZ}" -C piper --strip-components=1
-    rm "/tmp/${PIPER_TGZ}"
-    chmod +x piper/piper
-else
-    info "piper directory already exists"
-fi
-
-if [ ! -f "piper/${PIPER_VOICE_NAME}.onnx" ]; then
-    info "Downloading voice model: $PIPER_VOICE_NAME …"
-    wget -q --show-progress \
-        "${PIPER_HF_BASE}/${PIPER_VOICE_NAME}.onnx" \
-        -O "piper/${PIPER_VOICE_NAME}.onnx"
-    wget -q \
-        "${PIPER_HF_BASE}/${PIPER_VOICE_NAME}.onnx.json" \
-        -O "piper/${PIPER_VOICE_NAME}.onnx.json"
-else
-    info "Voice model already present"
-fi
-
-# ── 6. Python environment ─────────────────────────────────────────────────────
-step "Python environment (uv)"
-export PATH="$HOME/.cargo/bin:$HOME/.local/bin:$PATH"
+step "uv + Python environment"
+command -v uv >/dev/null || curl -LsSf https://astral.sh/uv/install.sh | sh
 uv sync
 
-# ── Done ──────────────────────────────────────────────────────────────────────
-echo ""
-echo -e "${GREEN}✓ Setup complete!${NC}"
-echo ""
-echo "Run the voice assistant with:"
-echo "    uv run python main.py"
-echo ""
-echo "Tip: make sure a microphone and speaker are connected."
-echo "     Check audio devices with:  python3 -c \"import sounddevice; print(sounddevice.query_devices())\""
+step "Models → $MODELS"
+mkdir -p "$MODELS/cache"
+fetch https://huggingface.co/litert-community/gemma-4-E2B-it-litert-lm/resolve/main/gemma-4-E2B-it.litertlm \
+      "$MODELS/gemma-4-E2B-it.litertlm"
+fetch https://github.com/k2-fsa/sherpa-onnx/releases/download/asr-models/silero_vad_v5.onnx \
+      "$MODELS/silero_vad_v5.onnx"
+if [ ! -d "$MODELS/sherpa-onnx-nemo-parakeet-tdt-0.6b-v3-int8" ]; then
+    echo "→ parakeet-tdt-0.6b-v3-int8"
+    curl -fL --progress-bar https://github.com/k2-fsa/sherpa-onnx/releases/download/asr-models/sherpa-onnx-nemo-parakeet-tdt-0.6b-v3-int8.tar.bz2 \
+        | tar xj -C "$MODELS"
+fi
+V=https://huggingface.co/rhasspy/piper-voices/resolve/main/de/de_DE/thorsten_emotional/medium
+fetch "$V/de_DE-thorsten_emotional-medium.onnx" "$MODELS/de_DE-thorsten_emotional-medium.onnx"
+fetch "$V/de_DE-thorsten_emotional-medium.onnx.json" "$MODELS/de_DE-thorsten_emotional-medium.onnx.json"
+
+step "systemd service"
+sed -e "s|@USER@|$USER|g" -e "s|@ROOT@|$ROOT|g" deploy/robinson.service \
+    | sudo tee /etc/systemd/system/robinson.service >/dev/null
+sudo systemctl daemon-reload
+sudo systemctl enable robinson.service
+
+echo -e "\n\033[0;32m✓ Setup complete.\033[0m"
+echo "  start:  sudo systemctl start robinson   (logs: journalctl -u robinson -f)"
+echo "  debug:  uv run robinson --text           (type instead of talk)"

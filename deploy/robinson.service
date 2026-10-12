@@ -1,0 +1,20 @@
+[Unit]
+Description=Robinson offline voice robot
+After=sound.target network.target
+Wants=sound.target
+
+[Service]
+User=@USER@
+SupplementaryGroups=audio i2c gpio
+WorkingDirectory=@ROOT@
+EnvironmentFile=-@ROOT@/robinson.env
+ExecStart=@ROOT@/.venv/bin/robinson
+Restart=on-failure
+RestartSec=5
+# keep audio glitch-free while the LLM saturates all four cores
+Nice=-5
+IOSchedulingClass=realtime
+LimitRTPRIO=50
+
+[Install]
+WantedBy=multi-user.target

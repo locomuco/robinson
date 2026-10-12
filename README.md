@@ -1,68 +1,68 @@
-# Robinson 🤖
+# Robinson 🤖📺
 
-Minimal local voice assistant for Raspberry Pi 5.
+A friendly retro robot built into an old CRT TV, inspired by
+https://hackaday.io/project/189041-a-workbench-companion-from-an-amazon-echo-dot.
+Robinson talks German, runs **fully offline** on a Raspberry Pi 5 and moves
+its eyes (6 servos on a PCA9685).
 
 ```
-Mic → VAD → whisper.cpp (STT) → ollama (LLM) → piper (TTS) → Speaker
+mic ─► WebRTC AEC ─► Silero VAD ─► Parakeet v3 (STT) ─► Gemma 4 E2B (LiteRT-LM) ─► piper ─► speaker
+                        │                                     │ [mood] / [action] tags
+                        └── speech while talking = barge-in   └──► eyes thread (PCA9685)
 ```
 
-## Quick start
+| Stage | Choice | Pi 5 (16 GB) measured |
+|---|---|---|
+| VAD | Silero v5 via sherpa-onnx | < 1 ms / frame |
+| STT | Parakeet TDT 0.6B v3 int8 (sherpa-onnx), in-process | 0.58 s per utterance, 7 % WER (synthetic German set) |
+| LLM | Gemma 4 E2B, LiteRT-LM CPU + YNNPACK | 166 tok/s prefill, 10.5 tok/s decode, ~1.1 s to first token |
+| TTS | piper-tts 1.8 (thorsten_emotional), in-process | RTF 0.13 |
+| AEC | WebRTC APM (livekit.rtc) on the duplex stream | |
+| Eyes | adafruit-circuitpython-servokit on Blinka / rpi-lgpio | |
+
+Hardware: Raspberry Pi 5 (8 GB+), NVMe SSD, USB audio adapter (mic + speaker),
+PCA9685 servo board on I2C, **active cooling** — without it the SoC hits
+85 °C+ within minutes of LLM load and drops to 1.5 GHz.
+
+## Install
+
+On a fresh Raspberry Pi OS Lite (trixie, 64-bit):
 
 ```bash
-./setup.sh        # ~10 min first run (builds whisper.cpp, downloads models)
-uv run python main.py
+git clone https://github.com/locomuco/robinson && cd robinson
+./setup.sh                      # deps, uv env, ~3.5 GB of models, I2C, systemd unit
+sudo systemctl start robinson   # starts on boot from now on
+journalctl -u robinson -f
 ```
 
-## Pipeline
+Debug without talking: `uv run robinson --text` (type, Robinson speaks) or
+`uv run robinson --text --no-audio` (pure chat in the terminal).
 
-| Stage | Tool | Model / Notes |
-|-------|------|---------------|
-| Voice Activity Detection | energy RMS | no extra deps |
-| Speech-to-Text | whisper.cpp | `base.en` (~150 MB) |
-| LLM | ollama | `qwen2.5:1.5b` (~1 GB, fast on Pi 5) |
-| Text-to-Speech | piper | `en_US-lessac-medium` (~60 MB) |
+## How it behaves
 
-## Tuning
+- Gemma starts each reply with a mood tag — `[fröhlich]`, `[überrascht]`,
+  `[müde]` … — that sets the eye lids / gaze style **and** the piper speaker
+  of the emotional Thorsten voice. Tags never reach the TTS.
+- Asking it to look somewhere ("schau nach links", "zwinker mal", "mach die
+  Augen zu") makes it emit action tags that the eye thread executes.
+- Eye states follow the conversation: idle wandering + blinking, wide-open
+  attentive while you speak, glancing up while thinking, lively while talking,
+  eyes closed after 5 min of silence.
+- Talking over Robinson interrupts it (barge-in); echo cancellation keeps its
+  own voice from triggering that.
 
-Edit the constants at the top of `main.py`:
+## Configuration
 
-| Constant | Default | Effect |
-|----------|---------|--------|
-| `ENERGY_THRESHOLD` | `0.015` | Raise if background noise triggers false STT |
-| `SILENCE_FRAMES` | `25` | Frames of quiet before utterance ends (~750 ms) |
-| `OLLAMA_MODEL` | `qwen2.5:1.5b` | Swap to `llama3.2:3b` for better quality |
-| `WHISPER_MODEL` | `base.en` | `tiny.en` for speed, `small.en` for accuracy |
+All knobs live in `robinson/config.py`; override any of them with
+`ROBINSON_<NAME>` in `robinson.env` next to this README, e.g.
 
-## Swapping models
-
-```bash
-# Faster whisper (less accurate)
-bash whisper.cpp/models/download-ggml-model.sh tiny.en
-# Change WHISPER_MODEL in main.py to "whisper.cpp/models/ggml-tiny.en.bin"
-
-# Better LLM
-ollama pull llama3.2:3b
-# Change OLLAMA_MODEL in main.py
+```
+ROBINSON_STT_ENGINE=whisper       # needs: uv sync --extra whisper
+ROBINSON_EYES=sim                 # no servos attached
+ROBINSON_AEC=false
 ```
 
-## Troubleshooting
+## Benchmarks
 
-```bash
-# List audio devices
-uv run python -c "import sounddevice; print(sounddevice.query_devices())"
-
-# Test microphone
-uv run python -c "
-import sounddevice as sd, numpy as np
-print('Recording 3s …')
-a = sd.rec(48000, samplerate=16000, channels=1)
-sd.wait()
-print('Peak:', np.abs(a).max())
-"
-
-# Test piper
-echo 'Hello from Robinson' | ./piper/piper --model piper/en_US-lessac-medium.onnx --output-raw | aplay -r 22050 -f S16_LE -c 1
-
-# Test ollama
-curl http://localhost:11434/api/tags
-```
+`bench/bench_litert.py` (LLM configs, thermal log) and `bench/bench_stt.py`
+(German STT bake-off: Parakeet vs whisper.cpp vs Gemma audio).
