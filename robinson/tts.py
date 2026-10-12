@@ -12,6 +12,8 @@ import numpy as np
 from piper import PiperVoice, SynthesisConfig
 from scipy.signal import resample_poly
 
+from . import robotfx
+
 log = logging.getLogger("robinson.tts")
 
 # thorsten_emotional speakers: amused=0 angry=1 disgusted=2 drunk=3 neutral=4
@@ -26,12 +28,14 @@ _CLEAN = re.compile(r"[*_#`~>|]+")
 
 class Tts:
     def __init__(self, voice_path: str, out_rate: int, length_scale=0.9,
-                 noise_scale=0.8, noise_w_scale=0.9):
+                 noise_scale=0.8, noise_w_scale=0.9, robot: str = "aus"):
         self.voice = PiperVoice.load(voice_path)
         self.multi = self.voice.config.num_speakers > 1
         self.out_rate = out_rate
-        self.kw = dict(length_scale=length_scale, noise_scale=noise_scale,
-                       noise_w_scale=noise_w_scale)
+        self.robot = robot
+        mono = robotfx.monotone_factor(robot)   # robots speak flatter
+        self.kw = dict(length_scale=length_scale, noise_scale=noise_scale * mono,
+                       noise_w_scale=noise_w_scale * mono)
         log.info("TTS voice %s (%d speakers)", voice_path.rsplit("/", 1)[-1],
                  self.voice.config.num_speakers)
 
@@ -50,4 +54,4 @@ class Tts:
         if src != self.out_rate:
             g = gcd(src, self.out_rate)
             audio = resample_poly(audio, self.out_rate // g, src // g).astype(np.float32)
-        return audio
+        return robotfx.apply(audio, self.out_rate, self.robot)

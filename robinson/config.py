@@ -61,6 +61,7 @@ class Config:
     tts_length_scale: float = 0.9
     tts_noise_scale: float = 0.8
     tts_noise_w_scale: float = 0.9
+    tts_robot: str = "leicht"           # robot voice effect: aus | leicht | mittel | stark
 
     # ── eyes ─────────────────────────────────────────────────────────────────
     eyes: str = "auto"                  # auto | servo | sim | off

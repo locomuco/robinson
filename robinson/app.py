@@ -62,7 +62,8 @@ class Robinson:
                                  cfg.aec_delay_ms, cfg.output_gain)
             self.vad = self._make_vad()
         self.tts = Tts(cfg.path(cfg.tts_voice), self.audio.rate if self.audio else 48_000,
-                       cfg.tts_length_scale, cfg.tts_noise_scale, cfg.tts_noise_w_scale)
+                       cfg.tts_length_scale, cfg.tts_noise_scale, cfg.tts_noise_w_scale,
+                       cfg.tts_robot)
 
         self.utterances: queue.Queue = queue.Queue()
         self.busy = threading.Event()        # a reply is being produced/played
