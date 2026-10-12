@@ -67,6 +67,9 @@ class Robinson:
         self.utterances: queue.Queue = queue.Queue()
         self.busy = threading.Event()        # a reply is being produced/played
         self.cancel = threading.Event()      # barge-in: abandon current reply
+        self.started_speaking = threading.Event()  # first audio of the reply queued
+        self.merge_next = False              # user kept talking before we answered
+        self._prev_seg = np.zeros(0, np.float32)
         self.stop = threading.Event()
 
     def _make_vad(self):
@@ -109,7 +112,12 @@ class Robinson:
                 speech_since = speech_since or time.monotonic()
                 if time.monotonic() - speech_since >= self.cfg.barge_in_s \
                         and not self.cancel.is_set():
-                    log.info("barge-in")
+                    if self.started_speaking.is_set():
+                        log.info("barge-in")
+                    else:
+                        # only a pause mid-sentence: answer both parts together
+                        log.info("user continues — merging with previous utterance")
+                        self.merge_next = True
                     self.cancel.set()
                     self.llm.cancel()
                     self.audio.flush()
@@ -140,8 +148,13 @@ class Robinson:
                 seg = self.utterances.get(timeout=0.5)
             except queue.Empty:
                 continue
+            if self.merge_next:
+                seg = np.concatenate([self._prev_seg, np.zeros(1600, np.float32), seg])
+                self.merge_next = False
+            self._prev_seg = seg
             self.busy.set()
             self.cancel.clear()
+            self.started_speaking.clear()
             self.eyes.set_state("thinking")
             t0 = time.monotonic()
             text = self.stt(seg)
@@ -173,6 +186,7 @@ class Robinson:
                 return
             if first:
                 log.info("first audio after %.2fs", time.monotonic() - t0)
+                self.started_speaking.set()
                 self.eyes.set_state("speaking")
                 first = False
             spoken.append(sentence.strip())
