@@ -42,6 +42,7 @@ class Config:
         "[geradeaus], [zwinkern], [augen zu], [augen auf]."
     )
 
+    fillers: bool = True                # "Hmm." while the LLM thinks
     boot_greeting: bool = True          # say hello at startup (also warms up the LLM)
 
     # ── audio ────────────────────────────────────────────────────────────────

@@ -13,6 +13,7 @@ import argparse
 import logging
 import os
 import queue
+import random
 import re
 import signal
 import sys
@@ -65,6 +66,10 @@ class Robinson:
                        cfg.tts_length_scale, cfg.tts_noise_scale, cfg.tts_noise_w_scale,
                        cfg.tts_robot)
 
+        self.fillers = {}
+        if cfg.fillers and self.audio:
+            self.fillers = {k: [(p, self.tts.synth(p)) for p in v] for k, v in FILLERS.items()}
+        self._last_filler = None
         self.utterances: queue.Queue = queue.Queue()
         self.busy = threading.Event()        # a reply is being produced/played
         self.cancel = threading.Event()      # barge-in: abandon current reply
@@ -165,10 +170,21 @@ class Robinson:
                 self.busy.clear()
                 self.eyes.set_state("idle")
                 continue
+            self._play_filler(text)
             self.reply(text, t0)
             self.busy.clear()
             if not self.cancel.is_set():
                 self.eyes.set_state("idle")
+
+    def _play_filler(self, text: str) -> None:
+        kind = filler_kind(text)
+        if not kind or not self.fillers:
+            return
+        choices = [f for f in self.fillers[kind] if f[0] != self._last_filler] or self.fillers[kind]
+        phrase, audio = random.choice(choices)
+        self._last_filler = phrase
+        log.debug("filler: %s", phrase)
+        self.audio.play(audio)
 
     def reply(self, text: str, t0: float | None = None) -> str:
         t0 = t0 or time.monotonic()
@@ -256,6 +272,25 @@ class Robinson:
         self.eyes.stop()
         if self.audio:
             self.audio.close()
+
+
+# short sounds played right after STT while Gemma prefills (~1 s); never added
+# to the conversation, and they don't count as "speaking" for barge-in
+FILLERS = {
+    "question": ["Hmm.", "Hm, mal sehen.", "Moment.", "Hmm, lass mich überlegen.", "Also."],
+    "statement": ["Mhm.", "Aha.", "Okay.", "Ah.", "Verstehe."],
+}
+_GREETING = re.compile(r"^(hallo|hi|hey|servus|moin|guten (morgen|tag|abend)|tschüss|gute nacht)\b")
+_SHORT_REPLY = re.compile(r"^(danke|ja|nein|okay|ok|stopp?|genau|super)\b")
+_QUESTION = re.compile(r"\?\s*$|^(wer|wie|was|wo|wann|warum|wieso|weshalb|welche\w*|"
+                       r"kannst|könntest|hast|bist|weißt|erzähl|erklär|sag)\b")
+
+
+def filler_kind(text: str) -> str | None:
+    t = text.lower().strip()
+    if _GREETING.search(t) or (_SHORT_REPLY.search(t) and len(t.split()) <= 3):
+        return None   # the model's own "Hallo!" / "Gern!" is the right first sound
+    return "question" if _QUESTION.search(t) else "statement"
 
 
 _ANY_CUT = re.compile(f"{_SENT_END.pattern}|{_FIRST_CUT.pattern}")
