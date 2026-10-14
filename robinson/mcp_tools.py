@@ -24,7 +24,8 @@ def main() -> None:
     from .settings import Settings
     settings = Settings(os.environ.get("ROBINSON_SETTINGS_FILE") or cfg.settings_file)
     state_file = os.environ.get("ROBINSON_STATE_FILE") or cfg.state_file
-    for fn in make_tools(memory, eyes, None, settings, state_file, bool(cfg.maint_pin)):
+    for fn in make_tools(memory, eyes, None, settings, state_file, cfg.maintenance,
+                         bool(cfg.maint_pin)):
         server.add_tool(fn)
     server.run("stdio")
 

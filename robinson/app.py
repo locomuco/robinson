@@ -89,7 +89,7 @@ class Robinson:
         self.maint = Maintenance(os.path.dirname(os.path.dirname(os.path.abspath(__file__))),
                                  os.path.dirname(cfg.state_file), self._maint_done,
                                  model=cfg.maint_model)
-        self._pending: dict | None = None    # action waiting for "Ja" (+ PIN)
+        self._pending: dict | None = None    # action waiting for "Ja" (+ optional PIN)
         self._announcements: queue.Queue = queue.Queue()
         self.text_mode = False
         self._turn_user_actions: set[str] = set()
@@ -115,7 +115,7 @@ class Robinson:
             return LocalLlm(path, prompt, cfg.llm_threads, cfg.llm_max_tokens, cfg.llm_cache_dir,
                             tools=make_tools(self.memory, self.eye_cal, self._status,
                                              self.settings, cfg.state_file,
-                                             bool(cfg.maint_pin))
+                                             cfg.maintenance, bool(cfg.maint_pin))
                             if cfg.tools else None,
                             on_tool=self._on_tool, model_key=key)
 
@@ -331,13 +331,15 @@ class Robinson:
             return True
         if maintenance_undo_request(text):
             self._request_maint_undo()
-            self.say("Soll ich den letzten Wartungsauftrag zurücknehmen? Sag Ja und deine PIN.")
+            self.say("Soll ich den letzten Wartungsauftrag zurücknehmen? "
+                     f"Sag {self._confirm_words()}.")
             return True
         if task := maintenance_request(text):
             if self._request_maint(task):
-                self.say(f"Wartungsauftrag: {task} Sag Ja und deine PIN, dann lege ich los.")
+                self.say(f"Wartungsauftrag: {task} Sag {self._confirm_words()}, "
+                         "dann lege ich los.")
             else:
-                self.say("Der Wartungsmodus ist nicht eingerichtet.")
+                self.say("Der Wartungsmodus ist ausgeschaltet oder Claude Code fehlt.")
             return True
         if target := switch_request(text):
             self.say(self.llm.set_mode(target))
@@ -346,7 +348,10 @@ class Robinson:
 
     def _pin_ok(self, text: str) -> bool:
         from .control import spoken_digits
-        return bool(self.cfg.maint_pin) and self.cfg.maint_pin in spoken_digits(text)
+        return self.cfg.maint_pin in spoken_digits(text)
+
+    def _confirm_words(self) -> str:
+        return "Ja und deine PIN" if self.cfg.maint_pin else "Ja"
 
     def _set_pending(self, desc: str, action, ok: str, pin: bool = False) -> None:
         self._pending = {"desc": desc, "action": action, "ok": ok, "pin": pin,
@@ -360,16 +365,18 @@ class Robinson:
                            "ausschalten": "Gute Nacht!"}[what])
 
     def _request_maint(self, task: str) -> bool:
-        if not self.cfg.maint_pin or not self.maint.available:
+        if not self.cfg.maintenance or not self.maint.available:
             return False
         self._set_pending(f"Wartung: {task}", lambda: self.maint.start(task),
                           "Alles klar, ich gebe den Auftrag an Claude Code. Das dauert ein paar "
-                          "Minuten, ich sage Bescheid, wenn ich fertig bin.", pin=True)
+                          "Minuten, ich sage Bescheid, wenn ich fertig bin.",
+                          pin=bool(self.cfg.maint_pin))
         return True
 
     def _request_maint_undo(self) -> None:
         self._set_pending("Wartung rückgängig", self.maint.rollback,
-                          "Okay, ich nehme den letzten Wartungsauftrag zurück.", pin=True)
+                          "Okay, ich nehme den letzten Wartungsauftrag zurück.",
+                          pin=bool(self.cfg.maint_pin))
 
     def _maint_done(self, summary: str, code_changed: bool) -> None:
         self._announcements.put((summary, code_changed))

@@ -62,7 +62,8 @@ class Config:
     # NB: don't force a fixed first token (e.g. "start with an emoji") — it
     # stops Gemma from emitting tool calls.
     tools: bool = True
-    maint_pin: str = ""                 # spoken PIN for the Wartungsmodus; empty = disabled
+    maintenance: bool = True            # Wartungsmodus (Claude Code edits Robinson) on/off
+    maint_pin: str = ""                 # optional spoken PIN for it; empty = "Ja" suffices
     maint_model: str = "sonnet"         # Claude model doing maintenance jobs
     memory_file: str = os.path.join(HOME, "robinson-data", "memory.json")
     eyes_file: str = os.path.join(HOME, "robinson-data", "eyes.json")   # servo calibration

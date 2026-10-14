@@ -2,7 +2,7 @@
 
 The tools only *request* an action; the main process registers it as
 pending (on_tool callback) and runs it after the human confirms with "Ja"
-(+ the PIN for maintenance) in their next utterance.
+(+ a PIN for maintenance, if one is configured) in their next utterance.
 """
 
 import json
@@ -62,7 +62,9 @@ def maintenance_undo_request(text: str) -> bool:
     return bool(_MAINT_UNDO.search(text))
 
 
-def make_control_tools(state_dir: str, pin_set: bool) -> list:
+def make_control_tools(state_dir: str, enabled: bool, pin_set: bool = False) -> list:
+    confirm = "ein Ja zusammen mit der PIN" if pin_set else "ein Ja"
+
     def neustarten(was: str) -> str:
         """Startet Robinson oder den Raspberry Pi neu oder schaltet ihn aus. Ruf es sofort auf, ohne vorher selbst nachzufragen – es fragt selbst nach einem "Ja".
 
@@ -75,21 +77,21 @@ def make_control_tools(state_dir: str, pin_set: bool) -> list:
                 f"{RESTART_TARGETS[key]} sollst, und bitte um ein Ja.")
 
     def wartung(auftrag: str) -> str:
-        """Gibt einen Wartungsauftrag an Claude Code, das deinen eigenen Programmcode ändern kann (neue Funktionen, Verhalten ändern, Fehler beheben). Ruf es sofort auf, ohne vorher selbst nachzufragen – danach braucht es "Ja" und die PIN.
+        """Gibt einen Wartungsauftrag an Claude Code, das deinen eigenen Programmcode ändern kann (neue Funktionen, Verhalten ändern, Fehler beheben). Ruf es sofort auf, ohne vorher selbst nachzufragen – danach braucht es ein "Ja".
 
         Args:
           auftrag: Der Auftrag in den Worten des Menschen, möglichst vollständig.
         """
-        if not pin_set:
-            return "Der Wartungsmodus ist nicht eingerichtet (es ist keine PIN gesetzt)."
+        if not enabled:
+            return "Der Wartungsmodus ist ausgeschaltet."
         return ("Bestätigung nötig. Wiederhole den Auftrag in einem Satz und bitte den "
-                "Menschen um ein Ja zusammen mit der PIN.")
+                f"Menschen um {confirm}.")
 
     def wartung_rueckgaengig() -> str:
-        """Nimmt den letzten Wartungsauftrag zurück. Braucht danach "Ja" und die PIN."""
-        if not pin_set:
-            return "Der Wartungsmodus ist nicht eingerichtet (es ist keine PIN gesetzt)."
-        return "Bestätigung nötig. Bitte den Menschen um ein Ja zusammen mit der PIN."
+        """Nimmt den letzten Wartungsauftrag zurück. Braucht danach ein "Ja"."""
+        if not enabled:
+            return "Der Wartungsmodus ist ausgeschaltet."
+        return f"Bestätigung nötig. Bitte den Menschen um {confirm}."
 
     def wartung_status() -> str:
         """Sagt, ob gerade ein Wartungsauftrag läuft und welcher zuletzt lief."""
