@@ -68,7 +68,9 @@ def make_backend(kind: str):
         return None
     if kind in ("servo", "auto"):
         try:
-            return ServoBackend()
+            backend = ServoBackend()
+            log.info("eyes: PCA9685 servo driver found")
+            return backend
         except Exception as e:
             if kind == "servo":
                 raise
