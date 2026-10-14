@@ -523,8 +523,7 @@ class Robinson:
 # short sounds played right after STT while Gemma prefills (~1 s); never added
 # to the conversation, and they don't count as "speaking" for barge-in
 FILLERS = {
-    "question": ["Hmm.", "Hm, mal sehen.", "Moment.", "Hmm, lass mich überlegen.", "Also."],
-    "statement": ["Mhm.", "Aha.", "Okay.", "Ah.", "Verstehe."],
+    "question": ["Hmm.", "Hm.", "Hmm, mal sehen."],
 }
 _GREETING = re.compile(r"^(hallo|hi|hey|servus|moin|guten (morgen|tag|abend)|tschüss|gute nacht)\b")
 _SHORT_REPLY = re.compile(r"^(danke|ja|nein|okay|ok|stopp?|genau|super)\b")
@@ -574,7 +573,8 @@ def filler_kind(text: str) -> str | None:
     t = text.lower().strip()
     if _GREETING.search(t) or (_SHORT_REPLY.search(t) and len(t.split()) <= 3):
         return None   # the model's own "Hallo!" / "Gern!" is the right first sound
-    return "question" if _QUESTION.search(t) else "statement"
+    # only clear questions get a neutral "Hmm."; "Aha"/"Okay" on statements or commands often misfit
+    return "question" if _QUESTION.search(t) else None
 
 
 _ANY_CUT = re.compile(f"{_SENT_END.pattern}|{_FIRST_CUT.pattern}")
