@@ -151,8 +151,24 @@ class LocalLlm(Llm):
         )
         self.max_tokens = max_tokens
         self.conv = None
+        self.warm = False             # KV holds system prompt + tools, no real turns yet
         self.reset()
         log.info("local LLM ready in %.1fs", time.monotonic() - t0)
+
+    def warm_up(self) -> None:
+        """Prefill system prompt + tool schemas now (several seconds) with a hidden
+        turn, so a later fallback only pays for the new message."""
+        t0 = time.monotonic()
+        # neutral content, 1 output token: nothing here should colour later answers
+        for _ in self.conv.send_message_async("(Robinson ist im Bereitschaftsmodus.)",
+                                              max_output_tokens=1):
+            pass
+        self.warm = True
+        log.info("local LLM warmed up in %.1fs", time.monotonic() - t0)
+
+    def reset(self, keep: int = 0) -> None:
+        self.warm = False
+        super().reset(keep)
 
     def _open(self, history):
         if self.conv is not None:

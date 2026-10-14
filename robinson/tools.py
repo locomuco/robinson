@@ -51,4 +51,16 @@ def make_tools(memory: Memory, eyes: EyeCalibration | None = None) -> list:
             return f"Unbekannte Bewegung. Möglich: {', '.join(sorted(ACTIONS))}."
         return f"Ausgeführt: {name}."   # the main process performs it (on_tool callback)
 
-    return [uhrzeit, merken, vergessen, augen_bewegen, *(make_eye_tools(eyes) if eyes else [])]
+    def modell_wechseln(ziel: str) -> str:
+        """Wechselt dein Denken zwischen dem lokalen Modell auf dem Pi und dem Online-Modell (Claude). Gilt ab der nächsten Antwort.
+
+        Args:
+          ziel: "lokal" oder "online".
+        """
+        z = ziel.lower().strip()
+        if z not in ("lokal", "local", "offline", "online", "claude", "cloud"):
+            return "Ziel muss 'lokal' oder 'online' sein."
+        return f"Wechsel auf {'online' if z in ('online', 'claude', 'cloud') else 'lokal'} angefordert."
+
+    return [uhrzeit, merken, vergessen, augen_bewegen, modell_wechseln,
+            *(make_eye_tools(eyes) if eyes else [])]

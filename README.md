@@ -68,8 +68,18 @@ sudo systemctl restart robinson
 ```
 
 One `claude -p` process stays alive in stream-json mode; Robinson's tools are
-served to it by `python -m robinson.mcp_tools`. If the online backend can't
-start (no network, bad token) Robinson falls back to the local model.
+served to it by `python -m robinson.mcp_tools`.
+
+**Fallback and switching.** Gemma stays loaded (and pre-warmed) in online mode.
+If Claude doesn't respond within 5 s, the stream stalls, or the login fails,
+that turn is answered locally ("Ich bin gerade offline …"); a background check
+re-enables online once api.anthropic.com is reachable ("Ich bin wieder
+online."). Both models share one conversation — a backend that fell behind
+gets the turns it missed handed over, so nothing is lost. Say "Geh online" /
+"Wechsel auf das lokale Modell" (or let the model call `modell_wechseln`); the
+choice is saved in `~/robinson-data/state.json` and survives restarts.
+`ROBINSON_LLM` only sets the initial default. Test: `bench/test_fallback.py`
+(simulates an outage by blackholing the API address).
 Measured on the Pi: Haiku ~0.65 s to first word (local Gemma ~1.1 s).
 
 This is personal use of the unmodified Claude Code binary with your own

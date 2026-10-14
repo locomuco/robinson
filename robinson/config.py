@@ -14,7 +14,7 @@ HOME = os.path.expanduser("~")
 @dataclasses.dataclass
 class Config:
     # ── LLM backend ──────────────────────────────────────────────────────────
-    llm: str = "local"                  # local (Gemma on the Pi) | online (Claude Code)
+    llm: str = "local"                  # start mode if none saved: local | online (Claude Code)
     online_model: str = "haiku"         # haiku | sonnet | full model name
     online_thinking: bool = False       # extended thinking: +0.2-0.4 s to first word
 
@@ -42,7 +42,9 @@ class Config:
         "statt zu raten. Wenn dir jemand etwas Persönliches erzählt, das du dir für "
         "später merken solltest, etwa Namen, Vorlieben oder Geburtstage, rufst du "
         "merken auf. Behaupte nie, du hättest dir etwas gemerkt, ohne merken aufzurufen. "
-        "Wenn du etwas vergessen sollst, nutzt du vergessen. Für einzelne "
+        "Wenn du etwas vergessen sollst, nutzt du vergessen. Soll zwischen deinem "
+        "lokalen Kopf und dem Online-Modell gewechselt werden, nutzt du modell_wechseln. "
+        "Für einzelne "
         "Augenbewegungen wie zwinkern, blinzeln, Augen rollen, einschlafen, aufwachen "
         "oder irgendwohin schauen nutzt du augen_bewegen, gern auch von dir aus, wenn "
         "es passt. Nur wenn dein Mensch ausdrücklich die Mechanik dauerhaft einstellen "
@@ -54,6 +56,7 @@ class Config:
     tools: bool = True
     memory_file: str = os.path.join(HOME, "robinson-data", "memory.json")
     eyes_file: str = os.path.join(HOME, "robinson-data", "eyes.json")   # servo calibration
+    state_file: str = os.path.join(HOME, "robinson-data", "state.json") # e.g. chosen LLM mode
 
     fillers: bool = True                # "Hmm." while the LLM thinks
     boot_greeting: bool = True          # say hello at startup (also warms up the LLM)

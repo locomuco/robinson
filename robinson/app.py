@@ -88,28 +88,31 @@ class Robinson:
         self.stop = threading.Event()
 
     def _make_llm(self):
-        """Selected backend; online falls back to local if it can't start."""
+        """Router over the local model and (if a token is set up) Claude online."""
+        from .llm import LocalLlm
+        from .llm_router import LlmRouter
+        from .tools import make_tools
         cfg = self.cfg
         prompt = lambda: cfg.system_prompt + self.memory.prompt_section()  # noqa: E731
-        if cfg.llm == "online":
-            try:
-                from .llm_online import ClaudeCodeLlm
-                llm = ClaudeCodeLlm(prompt, cfg.online_model, cfg.memory_file,
-                                    on_tool=self._on_tool, eyes_file=cfg.eyes_file,
-                                    thinking=cfg.online_thinking)
-                # first turn proves auth + network; doubles as connection warm-up
-                if not "".join(v for k, v in llm.chat("Antworte nur mit: ok") if k == "text"):
-                    raise RuntimeError("empty reply")
-                llm.reset()
-                return llm
-            except Exception as e:
-                log.error("online LLM unavailable (%s) — falling back to local", e)
-        from .llm import LocalLlm
-        from .tools import make_tools
-        return LocalLlm(cfg.path(cfg.llm_model), prompt, cfg.llm_threads,
-                        cfg.llm_max_tokens, cfg.llm_cache_dir,
-                        tools=make_tools(self.memory, self.eye_cal) if cfg.tools else None,
-                        on_tool=self._on_tool)
+
+        def make_local():
+            return LocalLlm(cfg.path(cfg.llm_model), prompt, cfg.llm_threads,
+                            cfg.llm_max_tokens, cfg.llm_cache_dir,
+                            tools=make_tools(self.memory, self.eye_cal) if cfg.tools else None,
+                            on_tool=self._on_tool)
+
+        def make_online():
+            from .llm_online import ClaudeCodeLlm
+            return ClaudeCodeLlm(prompt, cfg.online_model, cfg.memory_file,
+                                 on_tool=self._on_tool, eyes_file=cfg.eyes_file,
+                                 thinking=cfg.online_thinking)
+
+        online_ready = bool(os.environ.get("CLAUDE_CODE_OAUTH_TOKEN")) or \
+            os.path.exists(os.path.expanduser("~/.claude/.credentials.json"))
+        if cfg.llm == "online" and not online_ready:
+            log.warning("ROBINSON_LLM=online but no Claude Code login found — using local")
+        return LlmRouter(make_local, make_online if online_ready else None, cfg.llm,
+                         cfg.state_file)
 
     def _on_tool(self, name: str, _args: dict) -> None:
         """After any tool call (in-process or in the MCP server): pick up file changes."""
@@ -121,6 +124,8 @@ class Robinson:
             self.llm.start_fresh()
         if name in EYE_TOOL_NAMES:
             self.eyes.calibration_changed()   # reloads eyes.json and shows the change
+        if name == "modell_wechseln":
+            self.llm.set_mode(_args.get("ziel", ""))
         if name == "augen_bewegen":
             from .eyes import normalize_action
             action = normalize_action(_args.get("aktion", ""), _args.get("auge", ""))
@@ -219,12 +224,25 @@ class Robinson:
                 self.busy.clear()
                 self.eyes.set_state("idle")
                 continue
+            if target := switch_request(text):
+                self.say(self.llm.set_mode(target))
+                self.busy.clear()
+                self.eyes.set_state("idle")
+                continue
             self._play_filler(text)
             self._update_memory(text)
             self.reply(text, t0)
             self.busy.clear()
             if not self.cancel.is_set():
                 self.eyes.set_state("idle")
+
+    def say(self, text: str) -> None:
+        """Speak a fixed sentence (no LLM), e.g. a mode-switch confirmation."""
+        log.info("said: %s", text)
+        if self.audio and (audio := self.tts.synth(text)) is not None:
+            self.audio.play(audio)
+            while self.audio.playing:
+                time.sleep(0.02)
 
     def _update_memory(self, text: str) -> None:
         """Deterministic remember/forget from the user's words (E2B often only
@@ -335,6 +353,9 @@ class Robinson:
         if self.audio:
             self.audio.start()
         for line in sys.stdin:
+            if target := switch_request(line):
+                print("Robinson:", self.llm.set_mode(target), flush=True)
+                continue
             self._update_memory(line)
             if line.strip():
                 self.eyes.set_state("thinking")
@@ -377,6 +398,24 @@ _MOOD_RULES = [
 def mood_of(sentence: str) -> str:
     t = sentence.lower()
     return next((m for m, rx in _MOOD_RULES if rx.search(t)), "neutral")
+
+
+_SWITCH_ONLINE = re.compile(r"\b(geh|gehe|wechsel\w*|schalt\w*|nimm|nutz\w*)\b.{0,30}\b(online|claude)\b"
+                            r"|\bonline (gehen|denken)\b")
+_SWITCH_LOCAL = re.compile(r"\b(geh|gehe|bleib\w*|wechsel\w*|schalt\w*|nimm|nutz\w*)\b.{0,30}"
+                           r"\b(offline|lokal\w*)\b|\boffline (gehen|bleiben)\b")
+
+
+def switch_request(text: str) -> str | None:
+    """'Geh online' → 'online', 'Wechsel auf das lokale Modell' → 'lokal'."""
+    t = text.lower()
+    if "?" in t:
+        return None
+    if _SWITCH_LOCAL.search(t):
+        return "lokal"
+    if _SWITCH_ONLINE.search(t):
+        return "online"
+    return None
 
 
 def filler_kind(text: str) -> str | None:

@@ -13,6 +13,8 @@ switching backends) gets earlier turns appended to its system prompt.
 import json
 import logging
 import os
+import select
+import socket
 import subprocess
 import sys
 import tempfile
@@ -27,8 +29,22 @@ MCP_SERVER = "robinson"
 _TOOL_PREFIX = f"mcp__{MCP_SERVER}__"
 
 
+class OnlineUnavailable(RuntimeError):
+    """No usable answer from Claude (network, auth, timeout, process died)."""
+
+
+def internet_ok(host: str = "api.anthropic.com", timeout: float = 2.0) -> bool:
+    try:
+        socket.create_connection((host, 443), timeout=timeout).close()
+        return True
+    except OSError:
+        return False
+
+
 class ClaudeCodeLlm(Llm):
     name = "online"
+    first_timeout_s = 5.0      # no API event this long after sending → give up (normal: < 1 s)
+    idle_timeout_s = 20.0      # stream stalls this long mid-reply → give up
 
     def __init__(self, system_prompt, model: str = "haiku", memory_file: str | None = None,
                  on_tool=None, claude_bin: str | None = None, max_turns_kept: int = 20,
@@ -74,13 +90,13 @@ class ClaudeCodeLlm(Llm):
              "--tools", "", "--mcp-config", self.mcp_path, "--strict-mcp-config",
              "--allowedTools", f"{_TOOL_PREFIX}*", "--system-prompt", prompt],
             stdin=subprocess.PIPE, stdout=subprocess.PIPE, stderr=subprocess.PIPE,
-            text=True, bufsize=1, cwd=self.workdir, env=env)
+            bufsize=0, cwd=self.workdir, env=env)   # binary: read with select + timeouts
         self._stderr = []
         threading.Thread(target=self._drain_stderr, args=(self.proc,), daemon=True).start()
 
     def _drain_stderr(self, proc) -> None:
         for line in proc.stderr:
-            self._stderr.append(line.rstrip())
+            self._stderr.append(line.decode(errors="replace").rstrip())
             del self._stderr[:-20]
 
     def _kill(self) -> None:
@@ -100,38 +116,66 @@ class ClaudeCodeLlm(Llm):
         self._kill()
 
     # ── one turn ─────────────────────────────────────────────────────────────
+    def _events(self):
+        """JSON events from claude's stdout, raising OnlineUnavailable on timeouts.
+
+        The deadline only advances on real progress (text, tool use, result) —
+        an offline claude still prints its init line and then retries forever."""
+        fd = self.proc.stdout.fileno()
+        buf = b""
+        deadline = time.monotonic() + self.first_timeout_s
+        while True:
+            left = deadline - time.monotonic()
+            if left <= 0:
+                raise OnlineUnavailable("timeout waiting for Claude")
+            ready, _, _ = select.select([fd], [], [], left)
+            if not ready:
+                continue
+            chunk = os.read(fd, 65536)
+            if not chunk:
+                if self._cancelled:
+                    return
+                raise OnlineUnavailable(f"claude process ended: {self._stderr[-3:]}")
+            buf += chunk
+            while b"\n" in buf:
+                line, buf = buf.split(b"\n", 1)
+                try:
+                    ev = json.loads(line)
+                except json.JSONDecodeError:
+                    continue
+                if ev.get("type") in ("stream_event", "assistant", "result"):
+                    deadline = time.monotonic() + self.idle_timeout_s
+                yield ev
+
     def _stream(self, text):
         if self.proc is None or self.proc.poll() is not None:
             self._open(self.history[:-1])
         msg = {"type": "user", "message": {"role": "user", "content": text}}
         try:
-            self.proc.stdin.write(json.dumps(msg, ensure_ascii=False) + "\n")
+            self.proc.stdin.write((json.dumps(msg, ensure_ascii=False) + "\n").encode())
             self.proc.stdin.flush()
         except (BrokenPipeError, OSError) as e:
-            raise RuntimeError(f"claude process gone: {e}; {self._stderr[-3:]}") from e
-        for line in self.proc.stdout:
-            try:
-                ev = json.loads(line)
-            except json.JSONDecodeError:
-                continue
-            kind = ev.get("type")
-            if kind == "stream_event":
-                inner = ev.get("event", {})
-                delta = inner.get("delta", {})
-                if delta.get("type") == "text_delta":
-                    yield delta["text"]
-            elif kind == "assistant":
-                for block in ev.get("message", {}).get("content", []):
-                    if block.get("type") == "tool_use":
-                        name = block.get("name", "").removeprefix(_TOOL_PREFIX)
-                        log.info("tool %s(%s)", name, json.dumps(block.get("input", {}),
-                                                                ensure_ascii=False))
-                        self._tool_ran = True
-                        if self.on_tool:
-                            self.on_tool(name, block.get("input", {}))
-            elif kind == "result":
-                if ev.get("is_error"):
-                    raise RuntimeError(f"claude: {ev.get('result')}")
-                return
-        if not self._cancelled:   # stdout closed without a result
-            raise RuntimeError(f"claude process ended: {self._stderr[-3:]}")
+            raise OnlineUnavailable(f"claude process gone: {e}; {self._stderr[-3:]}") from e
+        try:
+            for ev in self._events():
+                kind = ev.get("type")
+                if kind == "stream_event":
+                    delta = ev.get("event", {}).get("delta", {})
+                    if delta.get("type") == "text_delta":
+                        yield delta["text"]
+                elif kind == "assistant":
+                    for block in ev.get("message", {}).get("content", []):
+                        if block.get("type") == "tool_use":
+                            name = block.get("name", "").removeprefix(_TOOL_PREFIX)
+                            log.info("tool %s(%s)", name, json.dumps(block.get("input", {}),
+                                                                    ensure_ascii=False))
+                            self._tool_ran = True
+                            if self.on_tool:
+                                self.on_tool(name, block.get("input", {}))
+                elif kind == "result":
+                    if ev.get("is_error"):
+                        raise OnlineUnavailable(f"claude: {ev.get('result')}")
+                    return
+        except OnlineUnavailable:
+            self._kill()          # a stuck process is useless; rebuild next time
+            raise
