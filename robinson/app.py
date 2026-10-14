@@ -78,7 +78,8 @@ class Robinson:
             self.vad = self._make_vad()
         self.tts = Tts(cfg.path(cfg.tts_voice), self.audio.rate if self.audio else 48_000,
                        cfg.tts_length_scale, cfg.tts_noise_scale, cfg.tts_noise_w_scale,
-                       cfg.tts_robot, cfg.tts_pitch, cfg.tts_tone)
+                       cfg.tts_robot, cfg.tts_pitch, cfg.tts_tone,
+                       en_voice_path=cfg.path(cfg.tts_voice_en))
 
         self.fillers = {}
         if self.audio:

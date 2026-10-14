@@ -5,6 +5,7 @@ single-speaker voices ignore the mood.
 """
 
 import logging
+import os
 import re
 import numpy as np
 from piper import PiperVoice, SynthesisConfig
@@ -21,13 +22,34 @@ MOOD_SPEAKER = {
 }
 
 _CLEAN = re.compile(r"[*_#`~>|]+")
+_EN = frozenset("the and is are you your i it to of that this with for was what how can do not have be "
+                "hello hi yes no please thanks thank sure well my me we they he she in on at as but "
+                "will would could should there here just so very good great".split())
+_DE = frozenset("der die das und ist sind du dein ich es zu von dass mit für war was wie kann nicht "
+                "habe hallo ja nein bitte danke klar mein mir wir sie er in auf an als aber wird "
+                "würde könnte soll da hier nur so sehr gut".split())
+
+
+def is_english(text: str) -> bool:
+    words = re.findall(r"[a-zäöüß']+", text.lower())
+    if re.search(r"[äöüß]", text.lower()):
+        return False
+    en = sum(w in _EN for w in words)
+    de = sum(w in _DE for w in words)
+    return en >= 2 and en > de
 
 
 class Tts:
     def __init__(self, voice_path: str, out_rate: int, length_scale=0.9,
                  noise_scale=0.8, noise_w_scale=0.9, robot: str = "aus",
-                 pitch: float = 1.0, tone: str = "neutral"):
+                 pitch: float = 1.0, tone: str = "neutral", en_voice_path: str | None = None):
         self.voice = PiperVoice.load(voice_path)
+        self.en_voice = None
+        if en_voice_path and os.path.exists(en_voice_path):
+            try:
+                self.en_voice = PiperVoice.load(en_voice_path)
+            except Exception:
+                log.exception("English voice not loadable")
         self.multi = self.voice.config.num_speakers > 1
         self.out_rate = out_rate
         self.base = dict(length_scale=length_scale, noise_scale=noise_scale,
@@ -55,9 +77,12 @@ class Tts:
         text = _CLEAN.sub("", text).strip()
         if not re.search(r"\w", text):
             return None
+        voice, multi = self.voice, self.multi
+        if self.en_voice and is_english(text):     # English sentence → native English voice
+            voice, multi = self.en_voice, False
         cfg = SynthesisConfig(
-            speaker_id=MOOD_SPEAKER.get(mood, 4) if self.multi else None, **self.kw)
-        chunks = list(self.voice.synthesize(text, syn_config=cfg))
+            speaker_id=MOOD_SPEAKER.get(mood, 4) if multi else None, **self.kw)
+        chunks = list(voice.synthesize(text, syn_config=cfg))
         if not chunks:
             return None
         audio = np.concatenate([c.audio_float_array for c in chunks]).astype(np.float32)

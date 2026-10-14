@@ -32,6 +32,7 @@ class Config:
     whisper_model: str = "ggml-small.bin"
     vad_model: str = "silero_vad_v5.onnx"
     tts_voice: str = "de_DE-thorsten_emotional-medium.onnx"
+    tts_voice_en: str = "en_US-lessac-medium.onnx"   # used automatically for English sentences
 
     # ── persona ──────────────────────────────────────────────────────────────
     language: str = "de"
