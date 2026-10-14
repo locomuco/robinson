@@ -34,6 +34,11 @@ class Config:
     tts_voice: str = "de_DE-thorsten_emotional-medium.onnx"
     tts_voice_en: str = "en_US-ryan-medium.onnx"     # male; used when the human speaks English
 
+    speaker_model: str = os.path.join(HOME, "robinson-data", "models", "speaker.onnx")
+    speaker_file: str = os.path.join(HOME, "robinson-data", "speakers.json")  # voiceprints
+    speaker_id: bool = True             # recognise people by voice
+    speaker_threshold: float = 0.5      # cosine similarity needed for a match
+
     # ── persona ──────────────────────────────────────────────────────────────
     language: str = "de"
     system_prompt: str = (

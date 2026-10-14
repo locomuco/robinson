@@ -73,6 +73,14 @@ class Robinson:
             from .audio import AudioIO
             from .stt import make_stt
             self.stt = make_stt(cfg)
+            self.speakers = None
+            if cfg.speaker_id and os.path.exists(cfg.speaker_model):
+                try:
+                    from .speakers import SpeakerId
+                    self.speakers = SpeakerId(cfg.speaker_model, cfg.speaker_file,
+                                              cfg.speaker_threshold)
+                except Exception as e:  # noqa: BLE001
+                    log.warning("speaker id unavailable: %s", e)
             self.audio = AudioIO(cfg.audio_device, cfg.audio_rate, cfg.aec,
                                  cfg.aec_delay_ms, cfg.output_gain)
             self.vad = self._make_vad()
@@ -92,6 +100,7 @@ class Robinson:
         self._pending: dict | None = None    # action waiting for "Ja" (+ optional PIN)
         self._announcements: queue.Queue = queue.Queue()
         self.text_mode = False
+        self.speaker: str | None = None      # who spoke last (by voice), if known
         self.lang = "de"                     # language of the last human utterance
         self._turn_user_actions: set[str] = set()
         self._turn_tools: list[str] = []
@@ -282,6 +291,19 @@ class Robinson:
                 self.busy.clear()
                 self.eyes.set_state("idle")
                 continue
+            self.speaker = None
+            if self.audio and getattr(self, "speakers", None):
+                if (who := self._enroll_voice(text, seg)) is not None:
+                    self.say(who)
+                    self.busy.clear()
+                    self.eyes.set_state("idle")
+                    continue
+                try:
+                    self.speaker = self.speakers.identify(seg)
+                except Exception as e:  # noqa: BLE001
+                    log.warning("speaker id failed: %s", e)
+                if self.speaker:
+                    log.info("speaker: %s", self.speaker)
             if self._handle_direct(text):
                 self.busy.clear()
                 self.eyes.set_state("idle")
@@ -292,6 +314,19 @@ class Robinson:
             self.busy.clear()
             if not self.cancel.is_set():
                 self.eyes.set_state("idle")
+
+    def _enroll_voice(self, text: str, seg: np.ndarray) -> str | None:
+        """Answer to a "remember my voice" request, or None if it is none."""
+        from .speakers import enroll_request
+        name = enroll_request(text)
+        if name is None:
+            return None
+        if not name:
+            return "Wie heißt du? Sag zum Beispiel: Merk dir meine Stimme, ich bin Anna."
+        if self.speakers.enroll(name, seg):
+            self.memory.add(f"{name} ist ein Mensch, den ich an der Stimme erkenne")
+            return f"Alles klar {name}, ich erkenne dich jetzt an deiner Stimme."
+        return "Das war zu kurz. Sag es bitte nochmal etwas ausführlicher."
 
     def say(self, text: str) -> None:
         """Speak a fixed sentence (no LLM), e.g. a mode-switch confirmation."""
@@ -457,6 +492,8 @@ class Robinson:
 
         # the reply language is decided here, not left to the model
         hint = "(Please answer in English.) " if lang == "en" else "(Antworte auf Deutsch.) "
+        if self.speaker:
+            hint += f"(Es spricht gerade {self.speaker}.) "
         stream = self.llm.chat(hint + text)
         t_tok = None
         for kind, val in stream:
