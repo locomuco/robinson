@@ -143,5 +143,5 @@ class Maintenance:
         last["after"] = last["before"]
         with open(self.state_path, "w") as f:
             json.dump(last, f, ensure_ascii=False)
-        self.on_done(f"Ich habe den Wartungsauftrag zurückgenommen: {last.get('task')}.",
+        self.on_done(f"Ich habe den Wartungsauftrag zurückgenommen: {str(last.get('task')).rstrip('.')}.",
                      code_changed)
