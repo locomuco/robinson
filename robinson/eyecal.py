@@ -113,7 +113,10 @@ class EyeCalibration:
             idx = 0
         else:
             return "Position muss 'offen' oder 'geschlossen' sein."
-        sign = 1 if _norm(aenderung).startswith(("weiter", "mehr")) else -1
+        ch_ = _norm(aenderung)
+        if not ch_.startswith(("weiter", "mehr", "weniger", "nicht so")):
+            return "aenderung muss 'weiter' oder 'weniger' sein."
+        sign = 1 if ch_.startswith(("weiter", "mehr")) else -1
         grad = max(1, min(30, abs(int(grad))))
         with self._lock:
             self._snapshot()
@@ -156,6 +159,9 @@ class EyeCalibration:
                 cfg["mitte"] = max(0, min(180, cfg["mitte"] + step))
                 preview = {"kind": "gaze", "axis": axis, "key": "mitte"}
             elif r in cfg:
+                if not a.startswith(("weiter", "mehr", "weniger", "nicht so")):
+                    self.undo.pop()
+                    return "aenderung muss 'weiter' oder 'weniger' sein."
                 sign = 1 if a.startswith(("weiter", "mehr")) else -1
                 away = 1 if cfg[r] > cfg["mitte"] else -1
                 new = max(0, min(180, cfg[r] + sign * away * grad))
@@ -178,7 +184,9 @@ class EyeCalibration:
         if key is None:
             return ("Eigenschaft muss blinzeln, umherschauen, tempo, wachheit oder "
                     "einschlafen sein.")
-        more = a.startswith(("mehr", "öfter", "oefter", "schneller", "weiter", "später", "spaeter"))
+        more = a.startswith(("mehr", "öfter", "oefter", "schneller", "weiter", "später", "spaeter", "länger", "laenger"))
+        if not more and not a.startswith(("weniger", "seltener", "langsamer", "früher", "frueher", "kürzer", "kuerzer", "nicht so")):
+            return "aenderung muss 'mehr' oder 'weniger' sein."
         with self._lock:
             self._snapshot()
             v = self.data["behaviour"][key]

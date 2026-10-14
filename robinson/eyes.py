@@ -33,7 +33,35 @@ MOODS = {
     "flüsternd":    (0.70, 0.5, 0.20),
 }
 
-ACTIONS = {"links", "rechts", "oben", "unten", "geradeaus", "zwinkern", "augen zu", "augen auf"}
+# one-shot movements (no calibration change); see normalize_action for wording
+ACTIONS = {"links", "rechts", "oben", "unten", "geradeaus", "zwinkern", "zwinkern links",
+           "zwinkern rechts", "blinzeln", "augen rollen", "augen zu", "augen auf", "schlafen",
+           "aufwachen", "große augen", "skeptisch"}
+
+_ACTION_SYNONYMS = {
+    "zwinker": "zwinkern", "blinzel": "blinzeln", "roll": "augen rollen", "verdreh": "augen rollen",
+    "schlaf": "schlafen", "einschlaf": "schlafen", "wach": "aufwachen", "aufwach": "aufwachen",
+    "gross": "große augen", "groß": "große augen", "staun": "große augen", "weit auf": "große augen",
+    "skept": "skeptisch", "misstrau": "skeptisch", "zu": "augen zu", "schließ": "augen zu",
+    "auf": "augen auf", "öffne": "augen auf", "gerade": "geradeaus", "mitte": "geradeaus",
+    "hoch": "oben", "runter": "unten", "links": "links", "rechts": "rechts",
+    "oben": "oben", "unten": "unten",
+}
+
+
+def normalize_action(aktion: str, auge: str = "") -> str | None:
+    """Model/user wording → an ACTIONS name ("mit dem linken Auge zwinkern" → "zwinkern links")."""
+    a, e = aktion.lower().strip(), auge.lower().strip()
+    if a in ACTIONS:
+        name = a
+    else:
+        name = next((v for k, v in _ACTION_SYNONYMS.items() if k in a), None)
+    if name is None:
+        return None
+    side = "links" if "link" in (e or a) else "rechts" if "recht" in (e or a) else ""
+    if name in ("zwinkern", "blinzeln") and side and (e or name == "zwinkern"):
+        return f"zwinkern {side}"     # blinking with one eye *is* winking
+    return name
 
 
 class ServoBackend:
@@ -86,6 +114,9 @@ class Eyes(threading.Thread):
         self._last_activity = time.monotonic()
         self._hold_gaze_until = 0.0
         self._lids_closed_by_user = False
+        self._sleep_now = False            # "schlaf ein": sleep until spoken to
+        self._expr_until = 0.0             # temporary lid expression (große Augen …)
+        self._expr_openness = 1.0
 
     # ── public API (thread-safe, non-blocking) ───────────────────────────────
     def set_state(self, state: str) -> None:
@@ -102,6 +133,8 @@ class Eyes(threading.Thread):
     def action(self, name: str) -> None:
         if name in ACTIONS:
             with self._lock:
+                if name in ("aufwachen", "augen auf"):
+                    self._last_activity = time.monotonic()
                 self._actions.append(name)
 
     def stop(self) -> None:
@@ -195,6 +228,13 @@ class Eyes(threading.Thread):
 
             for a in actions:
                 openness = self._do_action(a, openness)
+            if self._sleep_now:
+                if state == "listening":
+                    self._sleep_now = False        # talking to it wakes it up
+                else:
+                    state = "sleep"
+            if time.monotonic() < self._expr_until:
+                openness = self._expr_openness
             if self._lids_closed_by_user:
                 openness = 0.0
 
@@ -242,11 +282,36 @@ class Eyes(threading.Thread):
             self._gaze(lr_c, edge - (5 if edge > ud_c else -5))
         elif a == "geradeaus":
             self._gaze(lr_c, ud_c)
-        elif a == "zwinkern":
-            self._lids(0.0, left=False)
-            time.sleep(0.25)
-            self._lids(openness, left=False)
+        elif a.startswith("zwinkern"):
+            left = a.endswith("links")             # default: right eye
+            self._lids(0.0, left=left, right=not left)
+            time.sleep(0.35)
+            self._lids(openness, left=left, right=not left)
             hold = 0.0
+        elif a == "blinzeln":
+            self._blink(openness)
+            hold = 0.0
+        elif a == "augen rollen":
+            # half circle over the top: right → up-right → up → up-left → left → centre
+            r, l, up = g_lr["rechts"], g_lr["links"], g_ud["oben"]
+            for lr, ud in ((r, ud_c), ((r + lr_c) / 2, up - 10), (lr_c, up), ((l + lr_c) / 2, up - 10),
+                           (l, ud_c), (lr_c, ud_c)):
+                self._gaze(lr, ud)
+                time.sleep(0.15)
+            hold = time.monotonic() + 1.0
+        elif a == "schlafen":
+            self._sleep_now = True
+            hold = 0.0
+        elif a == "aufwachen":
+            self._sleep_now = self._lids_closed_by_user = False
+            self._expr_until, self._expr_openness = time.monotonic() + 1.5, 1.0
+            self._gaze(lr_c, ud_c)
+        elif a == "große augen":
+            self._expr_until, self._expr_openness = time.monotonic() + 2.5, 1.0
+            self._gaze(lr_c, ud_c)
+        elif a == "skeptisch":
+            self._expr_until, self._expr_openness = time.monotonic() + 2.5, 0.35
+            self._gaze(lr_c + random.choice((-25, 25)), ud_c)
         elif a == "augen zu":
             self._lids_closed_by_user = True
             hold = 0.0

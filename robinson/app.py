@@ -39,9 +39,13 @@ _USER_ACTIONS = [
     (re.compile(r"\bnach oben\b"), "oben"),
     (re.compile(r"\bnach unten\b"), "unten"),
     (re.compile(r"\b(geradeaus|mich an)\b"), "geradeaus"),
-    (re.compile(r"\bzwinker"), "zwinkern"),
+    (re.compile(r"\bzwinker|(linke|rechte)n? auge\w* (\w+ )?blinzel|blinzel\w* (\w+ )*(linke|rechte)n? auge"),
+     "zwinkern"),
+    (re.compile(r"augen (\w+ )?(roll|verdreh)|(roll|verdreh)\w* (\w+ )?(die|deine) augen"), "augen rollen"),
+    (re.compile(r"\bschlaf (\w+ ){0,2}ein\b"), "schlafen"),   # imperative only
+    (re.compile(r"\bwach (\w+ )?auf\b"), "aufwachen"),
     (re.compile(r"\baugen (zu|schließen)|\bschließ\w* (die|deine) augen"), "augen zu"),
-    (re.compile(r"\baugen (auf|öffnen)|\bmach\w* (die|deine) augen auf|\bwach auf"), "augen auf"),
+    (re.compile(r"\baugen (auf|öffnen)|\bmach\w* (die|deine) augen auf"), "augen auf"),
 ]
 _FIRST_CUT = re.compile(r"(?<=[,;:])\s+")
 
@@ -73,6 +77,8 @@ class Robinson:
         if cfg.fillers and self.audio:
             self.fillers = {k: [(p, self.tts.synth(p)) for p in v] for k, v in FILLERS.items()}
         self._last_filler = None
+        self._turn_user_actions: set[str] = set()
+        self._turn_tools: list[str] = []
         self.utterances: queue.Queue = queue.Queue()
         self.busy = threading.Event()        # a reply is being produced/played
         self.cancel = threading.Event()      # barge-in: abandon current reply
@@ -108,12 +114,18 @@ class Robinson:
     def _on_tool(self, name: str, _args: dict) -> None:
         """After any tool call (in-process or in the MCP server): pick up file changes."""
         from .eyecal import EYE_TOOL_NAMES
+        self._turn_tools.append(name)
         if name in ("merken", "vergessen"):
             self.memory.reload()
         if name == "vergessen":
             self.llm.start_fresh()
         if name in EYE_TOOL_NAMES:
             self.eyes.calibration_changed()   # reloads eyes.json and shows the change
+        if name == "augen_bewegen":
+            from .eyes import normalize_action
+            action = normalize_action(_args.get("aktion", ""), _args.get("auge", ""))
+            if action and action not in self._turn_user_actions:   # not twice per turn
+                self.eyes.action(action)
 
     def _make_vad(self):
         import sherpa_onnx
@@ -240,6 +252,10 @@ class Robinson:
         tagged_mood = False   # an explicit tag/emoji from the model wins over wording
         heard = text.lower()
         user_actions = {a for rx, a in _USER_ACTIONS if rx.search(heard)}
+        if "zwinkern" in user_actions and (side := re.search(r"\b(linke|rechte)n? auge", heard)):
+            user_actions = (user_actions - {"zwinkern"}) | {f"zwinkern {side.group(1)[:-1]}s"}
+        self._turn_user_actions = user_actions
+        self._turn_tools = []
         for a in user_actions:
             self.eyes.action(a)
 
@@ -288,6 +304,10 @@ class Robinson:
                 cut = _SENT_END
         if buf.strip() and not self.cancel.is_set():
             speak(buf)
+        if not spoken and self._turn_tools and not self.cancel.is_set():
+            # Gemma sometimes ends a tool turn without any words — don't stay mute
+            speak(random.choice(["Bitte sehr!", "So!", "Voilà!"])
+                  if self._turn_tools[-1] == "augen_bewegen" else "Erledigt.")
         if self.audio:
             while self.audio.playing and not self.cancel.is_set():
                 time.sleep(0.02)

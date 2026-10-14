@@ -8,6 +8,7 @@ not force a fixed first token (e.g. "start with an emoji").
 import datetime
 
 from .eyecal import EyeCalibration, make_eye_tools
+from .eyes import ACTIONS, normalize_action
 from .memory import Memory
 
 _WOCHENTAG = ["Montag", "Dienstag", "Mittwoch", "Donnerstag", "Freitag", "Samstag", "Sonntag"]
@@ -38,4 +39,16 @@ def make_tools(memory: Memory, eyes: EyeCalibration | None = None) -> list:
         """
         return memory.forget(stichwort)
 
-    return [uhrzeit, merken, vergessen, *(make_eye_tools(eyes) if eyes else [])]
+    def augen_bewegen(aktion: str, auge: str = "") -> str:
+        """Führt sofort eine einzelne Augenbewegung aus, ohne etwas dauerhaft zu verstellen.
+
+        Args:
+          aktion: "zwinkern", "blinzeln", "augen rollen", "schlafen", "aufwachen", "große augen", "skeptisch", "augen zu", "augen auf", "links", "rechts", "oben", "unten" oder "geradeaus".
+          auge: Beim Zwinkern "links" oder "rechts", sonst leer.
+        """
+        name = normalize_action(aktion, auge)
+        if name is None:
+            return f"Unbekannte Bewegung. Möglich: {', '.join(sorted(ACTIONS))}."
+        return f"Ausgeführt: {name}."   # the main process performs it (on_tool callback)
+
+    return [uhrzeit, merken, vergessen, augen_bewegen, *(make_eye_tools(eyes) if eyes else [])]
