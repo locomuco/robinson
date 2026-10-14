@@ -5,11 +5,9 @@ The voice loop never moves servos directly. It sets a *state*
 *actions* (look left, wink, …); the controller turns that into gaze,
 saccades, blinks and lid shapes at ~25 Hz.
 
-Channel map and angle limits come from the original eyes.py:
-  ch0 left/right  30 (right) … 140 (left), center 85
-  ch1 up/down      0 (down)  …  90 (up),   center 45
-  ch2/3 left lids  bottom open 90 / closed 20, top open 0 / closed 50
-  ch4/5 right lids bottom open 0  / closed 90, top open 50 / closed 0
+Channels: 0 left/right, 1 up/down, 2/3 left lid bottom/top, 4/5 right lid
+bottom/top. Limits and behaviour factors come from EyeCalibration
+(eyes.json, adjustable by voice); after a change the eyes show the result.
 """
 
 import logging
@@ -17,15 +15,11 @@ import random
 import threading
 import time
 
+from .eyecal import L_BOT, L_TOP, LR, R_BOT, R_TOP, UD, EyeCalibration
+
 log = logging.getLogger("robinson.eyes")
 
-LR, UD, L_BOT, L_TOP, R_BOT, R_TOP = range(6)
-
-LR_RIGHT, LR_LEFT, LR_CENTER = 30, 140, 85
-UD_DOWN, UD_UP, UD_CENTER = 0, 90, 45
-
-# (open angle, closed angle) per lid channel
-LIDS = {L_BOT: (90, 20), L_TOP: (0, 50), R_BOT: (0, 90), R_TOP: (50, 0)}
+LID_CHANNELS = (L_BOT, L_TOP, R_BOT, R_TOP)
 
 # mood → (lid openness 0..1, gaze wander scale, blink rate per second)
 MOODS = {
@@ -79,10 +73,11 @@ def make_backend(kind: str):
 
 
 class Eyes(threading.Thread):
-    def __init__(self, backend, sleep_after_s: float = 300.0):
+    def __init__(self, backend, cal: EyeCalibration):
         super().__init__(name="eyes", daemon=True)
         self.b = backend
-        self.sleep_after_s = sleep_after_s
+        self.cal = cal
+        self._pos: dict[int, float] = {}
         self._lock = threading.Lock()
         self._state = "idle"
         self._mood = "neutral"
@@ -112,15 +107,61 @@ class Eyes(threading.Thread):
     def stop(self) -> None:
         self._stop.set()
 
+    def calibration_changed(self) -> None:
+        """eyes.json was modified (possibly by another process): reload it."""
+        self.cal.reload()
+
     # ── servo primitives ─────────────────────────────────────────────────────
+    def _set(self, ch: int, angle: float) -> None:
+        self._pos[ch] = angle
+        self.b.set(ch, angle)
+
     def _lids(self, openness: float, left: bool = True, right: bool = True) -> None:
-        for ch, (o, c) in LIDS.items():
+        for ch in LID_CHANNELS:
             if (ch in (L_BOT, L_TOP) and left) or (ch in (R_BOT, R_TOP) and right):
-                self.b.set(ch, c + (o - c) * openness)
+                o, c = self.cal.lid(ch)
+                self._set(ch, c + (o - c) * openness)
 
     def _gaze(self, lr: float, ud: float) -> None:
-        self.b.set(LR, max(LR_RIGHT, min(LR_LEFT, lr)))
-        self.b.set(UD, max(UD_DOWN, min(UD_UP, ud)))
+        g_lr, g_ud = self.cal.gaze("lr"), self.cal.gaze("ud")
+        lr = max(min(g_lr["links"], g_lr["rechts"]), min(max(g_lr["links"], g_lr["rechts"]), lr))
+        ud = max(min(g_ud["oben"], g_ud["unten"]), min(max(g_ud["oben"], g_ud["unten"]), ud))
+        tempo = self.cal.b("tempo")
+        glide = 0.0 if tempo >= 1.0 else (1.0 / tempo - 1.0) * 0.25   # slower = visible glide
+        start = (self._pos.get(LR, lr), self._pos.get(UD, ud))
+        steps = max(1, int(glide / 0.02))
+        for i in range(1, steps + 1):
+            f = i / steps
+            self._set(LR, start[0] + (lr - start[0]) * f)
+            self._set(UD, start[1] + (ud - start[1]) * f)
+            if steps > 1:
+                time.sleep(0.02)
+
+    def _centre(self) -> tuple[float, float]:
+        return self.cal.gaze("lr")["mitte"], self.cal.gaze("ud")["mitte"]
+
+    def _show_preview(self, p: dict, openness: float) -> None:
+        """Hold the adjusted part in the adjusted position so it can be judged."""
+        kind = p.get("kind")
+        if kind == "lid":
+            for ch in p["channels"]:
+                self._set(ch, self.cal.lid(ch)[p["index"]])
+            time.sleep(2.0)
+            self._lids(openness)
+        elif kind == "gaze":
+            g = self.cal.gaze(p["axis"])
+            lr, ud = self._centre()
+            if p["axis"] == "lr":
+                lr = g[p["key"]]
+            else:
+                ud = g[p["key"]]
+            self._gaze(lr, ud)
+            time.sleep(2.0)
+            self._gaze(*self._centre())
+        else:
+            self._gaze(*self._centre())
+            self._blink(openness)
+        self._hold_gaze_until = time.monotonic() + 0.5
 
     def _blink(self, openness: float, dur: float | None = None) -> None:
         self._lids(0.0)
@@ -131,7 +172,7 @@ class Eyes(threading.Thread):
     def run(self) -> None:
         if self.b is None:
             return
-        self._gaze(LR_CENTER, UD_CENTER)
+        self._gaze(*self._centre())
         self._lids(MOODS["neutral"][0])
         next_saccade = next_blink = time.monotonic()
         while not self._stop.is_set():
@@ -141,9 +182,16 @@ class Eyes(threading.Thread):
                 actions, self._actions = self._actions, []
                 idle_for = now - self._last_activity
             openness, wander, blink_rate = MOODS.get(mood, MOODS["neutral"])
+            openness = min(1.0, openness * self.cal.b("wachheit"))
+            wander *= self.cal.b("umherschauen")
+            blink_rate *= self.cal.b("blinzeln")
+            lr_c, ud_c = self._centre()
 
-            if state == "idle" and idle_for > self.sleep_after_s:
+            if state == "idle" and idle_for > self.cal.b("einschlafen_nach_s"):
                 state = "sleep"
+
+            if (p := self.cal.pop_preview()) is not None:
+                self._show_preview(p, openness)
 
             for a in actions:
                 openness = self._do_action(a, openness)
@@ -151,7 +199,7 @@ class Eyes(threading.Thread):
                 openness = 0.0
 
             if state == "sleep":
-                self._gaze(LR_CENTER, UD_DOWN + 10)
+                self._gaze(lr_c, self.cal.gaze("ud")["unten"] + 10)
                 self._lids(0.0)
                 self._stop.wait(0.2)
                 continue
@@ -165,12 +213,12 @@ class Eyes(threading.Thread):
             if now >= next_saccade and now >= self._hold_gaze_until:
                 if state == "thinking":
                     # classic "searching memory" glance: up and to one side
-                    lr = random.choice((LR_CENTER - 35, LR_CENTER + 35))
-                    ud = UD_CENTER + random.uniform(20, 35)
+                    lr = random.choice((lr_c - 35, lr_c + 35))
+                    ud = ud_c + random.uniform(20, 35)
                     next_saccade = now + random.uniform(0.8, 1.6)
                 else:
-                    lr = LR_CENTER + random.uniform(-30, 30) * wander
-                    ud = UD_CENTER + random.uniform(-15, 15) * wander
+                    lr = lr_c + random.uniform(-30, 30) * wander
+                    ud = ud_c + random.uniform(-15, 15) * wander
                     hold = (0.3, 1.2) if state == "speaking" else (0.6, 3.0)
                     next_saccade = now + random.uniform(*hold)
                 self._gaze(lr, ud)
@@ -184,16 +232,16 @@ class Eyes(threading.Thread):
 
     def _do_action(self, a: str, openness: float) -> float:
         hold = time.monotonic() + 2.5
-        if a == "links":
-            self._gaze(LR_LEFT - 10, UD_CENTER)
-        elif a == "rechts":
-            self._gaze(LR_RIGHT + 10, UD_CENTER)
-        elif a == "oben":
-            self._gaze(LR_CENTER, UD_UP - 5)
-        elif a == "unten":
-            self._gaze(LR_CENTER, UD_DOWN + 5)
+        g_lr, g_ud = self.cal.gaze("lr"), self.cal.gaze("ud")
+        lr_c, ud_c = self._centre()
+        if a in ("links", "rechts"):
+            edge = g_lr[a]
+            self._gaze(edge - (10 if edge > lr_c else -10), ud_c)
+        elif a in ("oben", "unten"):
+            edge = g_ud[a]
+            self._gaze(lr_c, edge - (5 if edge > ud_c else -5))
         elif a == "geradeaus":
-            self._gaze(LR_CENTER, UD_CENTER)
+            self._gaze(lr_c, ud_c)
         elif a == "zwinkern":
             self._lids(0.0, left=False)
             time.sleep(0.25)

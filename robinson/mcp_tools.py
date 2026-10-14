@@ -10,6 +10,7 @@ import os
 from mcp.server.mcpserver import MCPServer
 
 from .config import Config
+from .eyecal import EyeCalibration
 from .memory import Memory
 from .tools import make_tools
 
@@ -19,7 +20,8 @@ def main() -> None:
     cfg = Config.from_env()
     memory = Memory(os.environ.get("ROBINSON_MEMORY_FILE", cfg.memory_file))
     server = MCPServer("robinson", instructions="Werkzeuge des Roboters Robinson.")
-    for fn in make_tools(memory):
+    eyes = EyeCalibration(os.environ.get("ROBINSON_EYES_FILE", cfg.eyes_file))
+    for fn in make_tools(memory, eyes):
         server.add_tool(fn)
     server.run("stdio")
 

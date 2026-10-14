@@ -7,6 +7,7 @@ not force a fixed first token (e.g. "start with an emoji").
 
 import datetime
 
+from .eyecal import EyeCalibration, make_eye_tools
 from .memory import Memory
 
 _WOCHENTAG = ["Montag", "Dienstag", "Mittwoch", "Donnerstag", "Freitag", "Samstag", "Sonntag"]
@@ -14,7 +15,7 @@ _MONAT = ["Januar", "Februar", "März", "April", "Mai", "Juni", "Juli", "August"
           "September", "Oktober", "November", "Dezember"]
 
 
-def make_tools(memory: Memory) -> list:
+def make_tools(memory: Memory, eyes: EyeCalibration | None = None) -> list:
     def uhrzeit() -> str:
         """Gibt die aktuelle Uhrzeit, den Wochentag und das Datum zurück."""
         n = datetime.datetime.now()
@@ -37,4 +38,4 @@ def make_tools(memory: Memory) -> list:
         """
         return memory.forget(stichwort)
 
-    return [uhrzeit, merken, vergessen]
+    return [uhrzeit, merken, vergessen, *(make_eye_tools(eyes) if eyes else [])]

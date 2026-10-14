@@ -42,12 +42,16 @@ class Config:
         "statt zu raten. Wenn dir jemand etwas Persönliches erzählt, das du dir für "
         "später merken solltest, etwa Namen, Vorlieben oder Geburtstage, rufst du "
         "merken auf. Behaupte nie, du hättest dir etwas gemerkt, ohne merken aufzurufen. "
-        "Wenn du etwas vergessen sollst, nutzt du vergessen."
+        "Wenn du etwas vergessen sollst, nutzt du vergessen. Wenn dein Mensch die "
+        "Mechanik deiner Augen einstellen will, etwa ein Lid weiter schließen, weiter "
+        "nach links schauen oder öfter blinzeln, nutzt du die Augen-Werkzeuge und "
+        "sagst danach kurz, was du verstellt hast."
     )
     # NB: don't force a fixed first token (e.g. "start with an emoji") — it
     # stops Gemma from emitting tool calls.
     tools: bool = True
     memory_file: str = os.path.join(HOME, "robinson-data", "memory.json")
+    eyes_file: str = os.path.join(HOME, "robinson-data", "eyes.json")   # servo calibration
 
     fillers: bool = True                # "Hmm." while the LLM thinks
     boot_greeting: bool = True          # say hello at startup (also warms up the LLM)
@@ -79,7 +83,6 @@ class Config:
 
     # ── eyes ─────────────────────────────────────────────────────────────────
     eyes: str = "auto"                  # auto | servo | sim | off
-    sleep_after_s: float = 300.0        # close eyes after this long without talk
 
     @classmethod
     def from_env(cls) -> "Config":

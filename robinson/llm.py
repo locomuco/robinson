@@ -30,9 +30,11 @@ _EMOJI = re.compile("[\U0001F300-\U0001FAFF☀-➿️‍]")
 class Llm:
     name = "llm"
 
-    def __init__(self, system_prompt: Callable[[], str] | str, tools: list | None = None):
+    def __init__(self, system_prompt: Callable[[], str] | str, tools: list | None = None,
+                 on_tool: Callable[[str, dict], None] | None = None):
         # str, or a callable so the memory section is fresh on every reset
         self.system_prompt = system_prompt if callable(system_prompt) else (lambda: system_prompt)
+        self.on_tool = on_tool                # callback(name, args) after each tool call
         self.tools = [self._wrap_tool(t) for t in tools or []]
         self.history: list[dict] = []     # {"role": "user"|"assistant", "content": str}
         self._lock = threading.Lock()
@@ -84,6 +86,8 @@ class Llm:
                      ", ".join([*map(repr, args), *(f"{k}={v!r}" for k, v in kwargs.items())]),
                      result, time.monotonic() - t0)
             self._tool_ran = True
+            if self.on_tool:
+                self.on_tool(fn.__name__, kwargs)
             return result
         return wrapper
 
@@ -133,9 +137,9 @@ class LocalLlm(Llm):
 
     def __init__(self, model_path: str, system_prompt, threads: int = 4,
                  max_tokens: int = 4096, cache_dir: str | None = None,
-                 tools: list | None = None):
+                 tools: list | None = None, on_tool=None):
         import litert_lm as lm
-        super().__init__(system_prompt, tools)
+        super().__init__(system_prompt, tools, on_tool)
         lm.set_min_log_severity(lm.LogSeverity.ERROR)
         t0 = time.monotonic()
         self.engine = lm.Engine(

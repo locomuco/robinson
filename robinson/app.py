@@ -49,7 +49,9 @@ _FIRST_CUT = re.compile(r"(?<=[,;:])\s+")
 class Robinson:
     def __init__(self, cfg: Config, use_audio: bool = True):
         self.cfg = cfg
-        self.eyes = Eyes(make_backend(cfg.eyes), cfg.sleep_after_s)
+        from .eyecal import EyeCalibration
+        self.eye_cal = EyeCalibration(cfg.eyes_file)
+        self.eyes = Eyes(make_backend(cfg.eyes), self.eye_cal)
 
         from .memory import Memory
         from .tts import Tts
@@ -87,7 +89,7 @@ class Robinson:
             try:
                 from .llm_online import ClaudeCodeLlm
                 llm = ClaudeCodeLlm(prompt, cfg.online_model, cfg.memory_file,
-                                    on_tool=self._on_online_tool,
+                                    on_tool=self._on_tool, eyes_file=cfg.eyes_file,
                                     thinking=cfg.online_thinking)
                 # first turn proves auth + network; doubles as connection warm-up
                 if not "".join(v for k, v in llm.chat("Antworte nur mit: ok") if k == "text"):
@@ -100,14 +102,18 @@ class Robinson:
         from .tools import make_tools
         return LocalLlm(cfg.path(cfg.llm_model), prompt, cfg.llm_threads,
                         cfg.llm_max_tokens, cfg.llm_cache_dir,
-                        tools=make_tools(self.memory) if cfg.tools else None)
+                        tools=make_tools(self.memory, self.eye_cal) if cfg.tools else None,
+                        on_tool=self._on_tool)
 
-    def _on_online_tool(self, name: str, _input: dict) -> None:
-        # the MCP server wrote memory.json in its own process
+    def _on_tool(self, name: str, _args: dict) -> None:
+        """After any tool call (in-process or in the MCP server): pick up file changes."""
+        from .eyecal import EYE_TOOL_NAMES
         if name in ("merken", "vergessen"):
             self.memory.reload()
         if name == "vergessen":
             self.llm.start_fresh()
+        if name in EYE_TOOL_NAMES:
+            self.eyes.calibration_changed()   # reloads eyes.json and shows the change
 
     def _make_vad(self):
         import sherpa_onnx
