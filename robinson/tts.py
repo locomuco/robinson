@@ -22,12 +22,31 @@ MOOD_SPEAKER = {
 }
 
 _CLEAN = re.compile(r"[*_#`~>|]+")
-_EN = frozenset("the and is are you your i it to of that this with for was what how can do not have be "
-                "hello hi yes no please thanks thank sure well my me we they he she in on at as but "
-                "will would could should there here just so very good great".split())
-_DE = frozenset("der die das und ist sind du dein ich es zu von dass mit für war was wie kann nicht "
-                "habe hallo ja nein bitte danke klar mein mir wir sie er in auf an als aber wird "
-                "würde könnte soll da hier nur so sehr gut".split())
+_EN_WORDS = """
+the a an and or but if then so not no yes is are was were be been am do does did have has had
+i me my mine you your yours he him his she her it its we us our they them their this that these
+those there here what when where who whom why how which can could will would shall should may
+might must to of for with about from by at on up down out over under after before again now
+today tomorrow tonight time weather please thanks thank sorry hello hi hey okay sure well very
+really just only also too much many more most some any all every each one two three tell say
+said show give make let get got go going come know think want need like love look see hear
+talk speak sing play stop start help joke story funny short long little big good great nice
+bad new old right left please name call robot robots television tv eyes again morning evening
+night day week year "i'm" "it's" "don't" "can't" "you're" "what's" "that's" "let's" "isn't"
+""".replace('"', "").split()
+_DE_WORDS = """
+der die das den dem des ein eine einen einem einer und oder aber wenn dann nicht kein keine ja
+nein ist sind war waren sein bin bist hat habe hast haben ich mich mir mein meine du dich dir
+dein deine er ihn ihm sie ihr es wir uns unser euch wer wo wann warum wieso weshalb wie welche
+welcher kann kannst können könntest wird würde soll sollst muss darf zu von für mit über aus
+bei nach vor heute morgen abend jetzt gleich bitte danke hallo tschüss gern gerne klar gut sehr
+nur auch noch schon mal doch denn weil viel mehr alle etwas nichts erzähl erzähle erkläre sag
+sage mach mache gib zeig schau hör spiel witz geschichte kurz kurzen lang wetter zeit uhr
+roboter fernseher augen tag woche jahr wieder hier dort heißt heiße wohl eigentlich ganz
+""".split()
+# words that exist in both languages carry no signal
+_EN = frozenset(_EN_WORDS) - frozenset(_DE_WORDS) - {"in", "so", "was", "also", "will", "hat"}
+_DE = frozenset(_DE_WORDS) - frozenset(_EN_WORDS) - {"in", "so", "was", "also", "will", "hat"}
 
 
 def is_english(text: str) -> bool:
@@ -40,17 +59,18 @@ def is_english(text: str) -> bool:
 
 
 def detect_language(text: str, previous: str = "de") -> str:
-    """'en' or 'de' for what the human said. Ambiguous one-worders ("Hello?" —
-    Parakeet also writes that for a German "Hallo") keep the previous language."""
+    """'en' or 'de' for what the human said. Ambiguous utterances ("Hello?" —
+    Parakeet also writes that for a German "Hallo", "OK.") keep the previous
+    turn's language."""
     t = text.lower()
-    words = re.findall(r"[a-zäöüß']+", t)
     if re.search(r"[äöüß]", t):
         return "de"
+    words = re.findall(r"[a-z']+", t)
     en = sum(w in _EN for w in words)
     de = sum(w in _DE for w in words)
-    if en > de and (en >= 2 or len(words) <= 3 and en == len(words) and len(words) > 1):
+    if en >= 2 and en > de:
         return "en"
-    if de > en or (de and de == en):
+    if de >= 1 and de >= en:
         return "de"
     return previous
 
