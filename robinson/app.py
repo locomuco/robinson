@@ -92,6 +92,7 @@ class Robinson:
         self._pending: dict | None = None    # action waiting for "Ja" (+ optional PIN)
         self._announcements: queue.Queue = queue.Queue()
         self.text_mode = False
+        self.lang = "de"                     # language of the last human utterance
         self._turn_user_actions: set[str] = set()
         self._turn_tools: list[str] = []
         self.utterances: queue.Queue = queue.Queue()
@@ -432,6 +433,8 @@ class Robinson:
         self._turn_tools = []
         for a in user_actions:
             self.eyes.action(a)
+        from .tts import detect_language
+        self.lang = lang = detect_language(text, self.lang)
 
         def speak(sentence: str) -> None:
             nonlocal first, mood
@@ -439,7 +442,7 @@ class Robinson:
                 mood = mood_of(sentence)
                 self.eyes.set_mood(mood)
             ts = time.monotonic()
-            audio = self.tts.synth(sentence, mood)
+            audio = self.tts.synth(sentence, mood, lang)
             log.debug("tts %.2fs: %s", time.monotonic() - ts, sentence.strip()[:40])
             if audio is None or self.cancel.is_set():
                 return
@@ -452,7 +455,9 @@ class Robinson:
             if self.audio:
                 self.audio.play(audio)
 
-        stream = self.llm.chat(text)
+        # the reply language is decided here, not left to the model
+        hint = "(Please answer in English.) " if lang == "en" else "(Antworte auf Deutsch.) "
+        stream = self.llm.chat(hint + text)
         t_tok = None
         for kind, val in stream:
             if t_tok is None:

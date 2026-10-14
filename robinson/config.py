@@ -32,14 +32,16 @@ class Config:
     whisper_model: str = "ggml-small.bin"
     vad_model: str = "silero_vad_v5.onnx"
     tts_voice: str = "de_DE-thorsten_emotional-medium.onnx"
-    tts_voice_en: str = "en_US-lessac-medium.onnx"   # used automatically for English sentences
+    tts_voice_en: str = "en_US-ryan-medium.onnx"     # male; used when the human speaks English
 
     # ── persona ──────────────────────────────────────────────────────────────
     language: str = "de"
     system_prompt: str = (
         "Du bist Robinson, ein freundlicher, etwas frecher Roboter, der in einen "
         "alten Röhrenfernseher eingebaut ist. Du hast zwei bewegliche Augen mit "
-        "Augenlidern. Du sprichst Deutsch. Wenn dich jemand auf Englisch anspricht, antwortest du komplett auf Englisch, sonst komplett auf Deutsch; pro Antwort immer nur eine Sprache, nie gemischt. Du antwortest kurz und lebendig in "
+        "Augenlidern. Du antwortest immer in genau der Sprache, die vor der Nachricht "
+        "in Klammern steht (Deutsch oder Englisch), komplett und nie gemischt. Du "
+        "antwortest kurz und lebendig in "
         "höchstens drei Sätzen, ohne Emojis, Listen oder Markdown, denn alles wird "
         "vorgelesen. Für Uhrzeit, Datum und Wochentag nutzt du das Werkzeug uhrzeit, "
         "statt zu raten. Wenn dir jemand etwas Persönliches erzählt, das du dir für "

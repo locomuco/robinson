@@ -39,6 +39,22 @@ def is_english(text: str) -> bool:
     return en >= 2 and en > de
 
 
+def detect_language(text: str, previous: str = "de") -> str:
+    """'en' or 'de' for what the human said. Ambiguous one-worders ("Hello?" —
+    Parakeet also writes that for a German "Hallo") keep the previous language."""
+    t = text.lower()
+    words = re.findall(r"[a-zäöüß']+", t)
+    if re.search(r"[äöüß]", t):
+        return "de"
+    en = sum(w in _EN for w in words)
+    de = sum(w in _DE for w in words)
+    if en > de and (en >= 2 or len(words) <= 3 and en == len(words) and len(words) > 1):
+        return "en"
+    if de > en or (de and de == en):
+        return "de"
+    return previous
+
+
 class Tts:
     def __init__(self, voice_path: str, out_rate: int, length_scale=0.9,
                  noise_scale=0.8, noise_w_scale=0.9, robot: str = "aus",
@@ -72,13 +88,14 @@ class Tts:
                        noise_scale=self.base["noise_scale"] * mono,
                        noise_w_scale=self.base["noise_w_scale"] * mono)
 
-    def synth(self, text: str, mood: str = "neutral") -> np.ndarray | None:
+    def synth(self, text: str, mood: str = "neutral", lang: str | None = None) -> np.ndarray | None:
         """Text → mono float32 at the output rate (None if nothing to say)."""
         text = _CLEAN.sub("", text).strip()
         if not re.search(r"\w", text):
             return None
         voice, multi = self.voice, self.multi
-        if self.en_voice and is_english(text):     # English sentence → native English voice
+        english = lang == "en" if lang else is_english(text)
+        if self.en_voice and english:              # English reply → native English voice
             voice, multi = self.en_voice, False
         cfg = SynthesisConfig(
             speaker_id=MOOD_SPEAKER.get(mood, 4) if multi else None, **self.kw)
