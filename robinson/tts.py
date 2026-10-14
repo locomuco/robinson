@@ -43,6 +43,7 @@ bei nach vor heute morgen abend jetzt gleich bitte danke hallo tschüss gern ger
 nur auch noch schon mal doch denn weil viel mehr alle etwas nichts erzähl erzähle erkläre sag
 sage mach mache gib zeig schau hör spiel witz geschichte kurz kurzen lang wetter zeit uhr
 roboter fernseher augen tag woche jahr wieder hier dort heißt heiße wohl eigentlich ganz
+gute guten guter nacht lied musik singen spielen sprich sprechen licht tür spaß
 """.split()
 # words that exist in both languages carry no signal
 _EN = frozenset(_EN_WORDS) - frozenset(_DE_WORDS) - {"in", "so", "was", "also", "will", "hat"}
