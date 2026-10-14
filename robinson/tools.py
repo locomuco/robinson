@@ -6,6 +6,8 @@ not force a fixed first token (e.g. "start with an emoji").
 """
 
 import datetime
+import json
+import os
 
 from .eyecal import EyeCalibration, make_eye_tools
 from .eyes import ACTIONS, normalize_action
@@ -16,7 +18,7 @@ _MONAT = ["Januar", "Februar", "März", "April", "Mai", "Juni", "Juli", "August"
           "September", "Oktober", "November", "Dezember"]
 
 
-def make_tools(memory: Memory, eyes: EyeCalibration | None = None) -> list:
+def make_tools(memory: Memory, eyes: EyeCalibration | None = None, status=None) -> list:
     def uhrzeit() -> str:
         """Gibt die aktuelle Uhrzeit, den Wochentag und das Datum zurück."""
         n = datetime.datetime.now()
@@ -52,15 +54,26 @@ def make_tools(memory: Memory, eyes: EyeCalibration | None = None) -> list:
         return f"Ausgeführt: {name}."   # the main process performs it (on_tool callback)
 
     def modell_wechseln(ziel: str) -> str:
-        """Wechselt dein Denken zwischen dem lokalen Modell auf dem Pi und dem Online-Modell (Claude). Gilt ab der nächsten Antwort.
+        """Wechselt das Modell, mit dem du denkst. Gilt ab der nächsten Antwort.
 
         Args:
-          ziel: "lokal" oder "online".
+          ziel: "lokal", "online", "haiku" (schnell), "sonnet" (klüger), "opus" (am stärksten, langsam), "gemma klein" (lokal, schnell) oder "gemma groß" (lokal, langsam).
         """
-        z = ziel.lower().strip()
-        if z not in ("lokal", "local", "offline", "online", "claude", "cloud"):
-            return "Ziel muss 'lokal' oder 'online' sein."
-        return f"Wechsel auf {'online' if z in ('online', 'claude', 'cloud') else 'lokal'} angefordert."
+        from .llm_router import parse_target
+        if parse_target(ziel) is None:
+            return "Unbekanntes Ziel. Möglich: lokal, online, haiku, sonnet, opus, gemma klein, gemma groß."
+        return f"Wechsel auf {ziel} angefordert."
 
-    return [uhrzeit, merken, vergessen, augen_bewegen, modell_wechseln,
+    def aktuelles_modell() -> str:
+        """Sagt, mit welchem Modell du gerade denkst (lokal oder online, welches Modell)."""
+        if status is not None:
+            return status()
+        try:   # MCP server process: report the saved choice
+            with open(os.environ.get("ROBINSON_STATE_FILE", "")) as f:
+                st = json.load(f)
+            return f"Modus {st.get('llm')}, online {st.get('online_model')}, lokal {st.get('local_model')}."
+        except (OSError, json.JSONDecodeError):
+            return "Unbekannt."
+
+    return [uhrzeit, merken, vergessen, augen_bewegen, modell_wechseln, aktuelles_modell,
             *(make_eye_tools(eyes) if eyes else [])]

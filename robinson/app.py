@@ -95,16 +95,18 @@ class Robinson:
         cfg = self.cfg
         prompt = lambda: cfg.system_prompt + self.memory.prompt_section()  # noqa: E731
 
-        def make_local():
-            return LocalLlm(cfg.path(cfg.llm_model), prompt, cfg.llm_threads,
-                            cfg.llm_max_tokens, cfg.llm_cache_dir,
-                            tools=make_tools(self.memory, self.eye_cal) if cfg.tools else None,
-                            on_tool=self._on_tool)
+        def make_local(key: str):
+            path = cfg.path(cfg.local_model_files.get(key, cfg.local_model_files["e2b"]))
+            return LocalLlm(path, prompt, cfg.llm_threads, cfg.llm_max_tokens, cfg.llm_cache_dir,
+                            tools=make_tools(self.memory, self.eye_cal, self._status)
+                            if cfg.tools else None,
+                            on_tool=self._on_tool, model_key=key)
 
-        def make_online():
+        def make_online(model: str):
             from .llm_online import ClaudeCodeLlm
-            return ClaudeCodeLlm(prompt, cfg.online_model, cfg.memory_file,
+            return ClaudeCodeLlm(prompt, model, cfg.memory_file,
                                  on_tool=self._on_tool, eyes_file=cfg.eyes_file,
+                                 state_file=cfg.state_file,
                                  thinking=cfg.online_thinking)
 
         online_ready = bool(os.environ.get("CLAUDE_CODE_OAUTH_TOKEN")) or \
@@ -112,7 +114,10 @@ class Robinson:
         if cfg.llm == "online" and not online_ready:
             log.warning("ROBINSON_LLM=online but no Claude Code login found — using local")
         return LlmRouter(make_local, make_online if online_ready else None, cfg.llm,
-                         cfg.state_file)
+                         cfg.state_file, cfg.local_model, cfg.online_model)
+
+    def _status(self) -> str:
+        return self.llm.status if hasattr(self, "llm") else ""
 
     def _on_tool(self, name: str, _args: dict) -> None:
         """After any tool call (in-process or in the MCP server): pick up file changes."""
@@ -400,22 +405,25 @@ def mood_of(sentence: str) -> str:
     return next((m for m, rx in _MOOD_RULES if rx.search(t)), "neutral")
 
 
-_SWITCH_ONLINE = re.compile(r"\b(geh|gehe|wechsel\w*|schalt\w*|nimm|nutz\w*)\b.{0,30}\b(online|claude)\b"
-                            r"|\bonline (gehen|denken)\b")
-_SWITCH_LOCAL = re.compile(r"\b(geh|gehe|bleib\w*|wechsel\w*|schalt\w*|nimm|nutz\w*)\b.{0,30}"
-                           r"\b(offline|lokal\w*)\b|\boffline (gehen|bleiben)\b")
+_SWITCH = re.compile(r"\b(geh|gehe|wechsel\w*|schalt\w*|nimm|nutz\w*|benutz\w*|zurück zu|bleib\w*)\b"
+                     r"(?P<rest>.{0,40})$")
 
 
 def switch_request(text: str) -> str | None:
-    """'Geh online' → 'online', 'Wechsel auf das lokale Modell' → 'lokal'."""
-    t = text.lower()
+    """'Geh online' → 'online', 'Nimm Sonnet' → 'sonnet', 'Wechsel aufs große Gemma'
+    → 'gemma groß' … (returned text is parsed by LlmRouter.set_mode)."""
+    from .llm_router import parse_target
+    t = text.lower().strip()
     if "?" in t:
         return None
-    if _SWITCH_LOCAL.search(t):
-        return "lokal"
-    if _SWITCH_ONLINE.search(t):
-        return "online"
-    return None
+    m = _SWITCH.search(t)
+    if not m or parse_target(m.group("rest")) is None:
+        return None
+    rest = m.group("rest")
+    if "modell" not in rest and not re.search(r"online|offline|lokal|claude|haiku|heiku|sonnet|"
+                                             r"sonett|opus|gemma|e[24]b", rest):
+        return None
+    return rest.strip(" .!")
 
 
 def filler_kind(text: str) -> str | None:

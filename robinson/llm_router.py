@@ -15,6 +15,7 @@ survives restarts.
 import json
 import logging
 import os
+import re
 import threading
 import time
 from collections.abc import Callable, Iterator
@@ -25,16 +26,44 @@ log = logging.getLogger("robinson.llm")
 
 MODES = ("local", "online")
 
+# spoken/model wording → (mode, model key). Parakeet spellings included.
+LOCAL_MODELS = {"e2b": "Gemma 4 E2B", "e4b": "Gemma 4 E4B"}
+ONLINE_MODELS = {"haiku": "Claude Haiku", "sonnet": "Claude Sonnet", "opus": "Claude Opus"}
+_ALIASES = [
+    (r"haiku|heiku|haiko", ("online", "haiku")),
+    (r"sonnet|sonett|sonet", ("online", "sonnet")),
+    (r"opus", ("online", "opus")),
+    (r"e ?4 ?b|(groß|gross|größ|gröss)\w*\s+(\w+\s+)?(lokal|gemma)|gemma\s+(groß|gross)", ("local", "e4b")),
+    (r"e ?2 ?b|klein\w*\s+(\w+\s+)?(lokal|gemma)|gemma\s+klein|\bgemma\b", ("local", "e2b")),
+    (r"online|claude|cloud|internet", ("online", None)),
+    (r"lokal|local|offline", ("local", None)),
+]
+
+
+def parse_target(text: str) -> tuple[str, str | None] | None:
+    t = " ".join(text.lower().replace("-", " ").split())
+    for pattern, target in _ALIASES:
+        if re.search(pattern, t):
+            return target
+    return None
+
 
 class LlmRouter:
     health_interval_s = 20.0
     min_offline_s = 30.0        # after a failure, don't retry online sooner than this
 
-    def __init__(self, make_local: Callable[[], Llm], make_online: Callable[[], Llm] | None,
-                 mode: str, state_file: str):
-        self.make_local, self.make_online = make_local, make_online
+    def __init__(self, make_local: Callable[[str], Llm], make_online: Callable[[str], Llm] | None,
+                 mode: str, state_file: str, local_model: str = "e2b",
+                 online_model: str = "haiku"):
+        self._make_local, self._make_online = make_local, make_online
+        self.make_online = make_online           # None = online not set up
         self.state_file = state_file
-        self.mode = self._load_mode(mode)
+        state = self._load_state()
+        self.mode = state.get("llm", mode) if state.get("llm", mode) in MODES else "local"
+        self.local_model = state.get("local_model", local_model)
+        self.online_model = state.get("online_model", online_model)
+        self._lock = threading.Lock()
+        self._save_mode()   # the MCP tool server reads the current choice from this file
         self.history: list[dict] = []
         self.local: Llm | None = None
         self.online: Llm | None = None
@@ -57,13 +86,12 @@ class LlmRouter:
         threading.Thread(target=self._health_loop, name="llm-health", daemon=True).start()
 
     # ── setup / state ────────────────────────────────────────────────────────
-    def _load_mode(self, default: str) -> str:
+    def _load_state(self) -> dict:
         try:
             with open(self.state_file) as f:
-                mode = json.load(f).get("llm", default)
+                return json.load(f)
         except (OSError, json.JSONDecodeError):
-            mode = default
-        return mode if mode in MODES else "local"
+            return {}
 
     def _save_mode(self) -> None:
         os.makedirs(os.path.dirname(self.state_file) or ".", exist_ok=True)
@@ -73,12 +101,12 @@ class LlmRouter:
                 state = json.load(f)
         except (OSError, json.JSONDecodeError):
             pass
-        state["llm"] = self.mode
+        state.update(llm=self.mode, local_model=self.local_model, online_model=self.online_model)
         with open(self.state_file, "w") as f:
             json.dump(state, f)
 
     def _load_local(self) -> None:
-        local = self.make_local()
+        local = self._make_local(self.local_model)
         if self.mode == "online" and hasattr(local, "warm_up"):
             local.warm_up()          # stand-by: makes a fallback turn ~5 s faster
         self.local = local
@@ -86,7 +114,7 @@ class LlmRouter:
 
     def _start_online(self) -> None:
         try:
-            self.online = self.make_online()
+            self.online = self._make_online(self.online_model)
             self._seen["online"] = 0
         except Exception as e:
             log.error("online LLM could not start: %s", e)
@@ -121,29 +149,64 @@ class LlmRouter:
 
     @property
     def status(self) -> str:
+        local = LOCAL_MODELS.get(self.local_model, self.local_model)
+        online = ONLINE_MODELS.get(self.online_model, self.online_model)
         if self.mode == "local":
-            return "lokal"
-        return "online" if self._online_ok else "online gewählt, aber offline (antwortet lokal)"
+            return f"Ich denke lokal mit {local}."
+        if self._online_ok:
+            return f"Ich denke online mit {online}. Lokal steht {local} bereit."
+        return f"{online} ist gewählt, aber ich bin offline und antworte mit {local}."
 
-    def set_mode(self, mode: str) -> str:
-        mode = {"lokal": "local", "offline": "local", "local": "local",
-                "online": "online", "claude": "online", "cloud": "online"}.get(mode.lower().strip())
-        if mode is None:
-            return "Ziel muss 'lokal' oder 'online' sein."
+    def set_mode(self, target: str) -> str:
+        """Switch mode and/or model ("online", "lokal", "sonnet", "gemma groß" …).
+        Safe to call while a turn is running: a new local engine is only loaded
+        once that turn is over (see chat)."""
+        parsed = parse_target(target)
+        if parsed is None:
+            return ("Das kenne ich nicht. Möglich sind lokal, online, Haiku, Sonnet, Opus, "
+                    "kleines oder großes Gemma.")
+        mode, model = parsed
         if mode == "online" and not self.make_online:
-            return "Online ist nicht eingerichtet (kein Claude-Code-Token)."
-        changed = mode != self.mode
-        self.mode = mode
-        self._save_mode()
+            return "Online ist nicht eingerichtet (kein Claude-Code-Login)."
+        with self._lock:
+            before = (self.mode, self.local_model, self.online_model)
+            self.mode = mode
+            if model and mode == "online":
+                self.online_model = model
+            elif model:
+                self.local_model = model
+            self._save_mode()
+            after = (self.mode, self.local_model, self.online_model)
         if mode == "online":
             if self.online is None:
                 self._start_online()
+            elif getattr(self.online, "model", None) != self.online_model:
+                self.online.model = self.online_model
+                self.online.close()          # restarts with the new model on the next turn
             self._online_ok = self.online is not None
-        log.info("LLM mode → %s", mode)
-        if not changed:
-            return f"Ich bin schon {('online' if mode == 'online' else 'lokal')}."
-        return ("Ab jetzt denke ich online mit Claude." if mode == "online"
-                else "Ab jetzt denke ich lokal, ganz ohne Internet.")
+        log.info("LLM → %s (local %s, online %s)", self.mode, self.local_model, self.online_model)
+        if before == after:
+            return "Schon erledigt. " + self.status
+        if mode == "local" and self.local is not None and \
+                getattr(self.local, "model_key", self.local_model) != self.local_model:
+            if self._active is None:
+                self._swap_local()
+            else:
+                return f"Gleich: nach dieser Antwort lade ich {LOCAL_MODELS[self.local_model]}."
+        return "Gewechselt. " + self.status
+
+    def _swap_local(self) -> None:
+        """Load the selected Gemma variant and drop the old one (blocking, ~10 s)."""
+        old = self.local
+        if old is not None and getattr(old, "model_key", None) == self.local_model:
+            return
+        log.info("loading local model %s", self.local_model)
+        self._local_ready.clear()
+        self.local = None
+        if old is not None and hasattr(old, "close"):
+            old.close()
+        self._load_local()
+        self._seen["local"] = 0
 
     def _pick(self) -> Llm | None:
         if self.mode == "online" and self._online_ok and self.online is not None:
@@ -214,6 +277,9 @@ class LlmRouter:
             self.history = [dict(m) for m in b.history]
             self._seen[b.name] = len(self.history)
             self._active = None
+            if self.mode == "local" and self.local is not None and \
+                    getattr(self.local, "model_key", self.local_model) != self.local_model:
+                self._swap_local()           # requested by a tool call during this turn
 
     def cancel(self) -> None:
         if self._active is not None:

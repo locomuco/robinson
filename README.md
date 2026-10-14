@@ -75,9 +75,14 @@ If Claude doesn't respond within 5 s, the stream stalls, or the login fails,
 that turn is answered locally ("Ich bin gerade offline …"); a background check
 re-enables online once api.anthropic.com is reachable ("Ich bin wieder
 online."). Both models share one conversation — a backend that fell behind
-gets the turns it missed handed over, so nothing is lost. Say "Geh online" /
-"Wechsel auf das lokale Modell" (or let the model call `modell_wechseln`); the
-choice is saved in `~/robinson-data/state.json` and survives restarts.
+gets the turns it missed handed over, so nothing is lost.
+
+Switch by voice (or let the model call `modell_wechseln`): "Geh online",
+"Bleib offline", "Nimm Sonnet", "Wechsel auf Opus", "Zurück zu Haiku",
+"Nimm das große lokale Modell" (Gemma 4 E4B, ~3.6 tok/s) / "das kleine
+Gemma" (E2B, default). "Welches Modell nutzt du?" answers via
+`aktuelles_modell`. The choice is saved in `~/robinson-data/state.json` and
+survives restarts.
 `ROBINSON_LLM` only sets the initial default. Test: `bench/test_fallback.py`
 (simulates an outage by blackholing the API address).
 Measured on the Pi: Haiku ~0.65 s to first word (local Gemma ~1.1 s).

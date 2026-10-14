@@ -137,8 +137,9 @@ class LocalLlm(Llm):
 
     def __init__(self, model_path: str, system_prompt, threads: int = 4,
                  max_tokens: int = 4096, cache_dir: str | None = None,
-                 tools: list | None = None, on_tool=None):
+                 tools: list | None = None, on_tool=None, model_key: str = "e2b"):
         import litert_lm as lm
+        self.model_key = model_key
         super().__init__(system_prompt, tools, on_tool)
         lm.set_min_log_severity(lm.LogSeverity.ERROR)
         t0 = time.monotonic()
@@ -154,6 +155,12 @@ class LocalLlm(Llm):
         self.warm = False             # KV holds system prompt + tools, no real turns yet
         self.reset()
         log.info("local LLM ready in %.1fs", time.monotonic() - t0)
+
+    def close(self) -> None:
+        if self.conv is not None:
+            self.conv.close()
+            self.conv = None
+        self.engine.close()
 
     def warm_up(self) -> None:
         """Prefill system prompt + tool schemas now (several seconds) with a hidden

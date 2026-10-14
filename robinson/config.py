@@ -15,12 +15,14 @@ HOME = os.path.expanduser("~")
 class Config:
     # ── LLM backend ──────────────────────────────────────────────────────────
     llm: str = "local"                  # start mode if none saved: local | online (Claude Code)
-    online_model: str = "haiku"         # haiku | sonnet | full model name
+    online_model: str = "haiku"         # haiku | sonnet | opus (if none saved)
+    local_model: str = "e2b"            # e2b | e4b (if none saved)
     online_thinking: bool = False       # extended thinking: +0.2-0.4 s to first word
 
     # ── models ───────────────────────────────────────────────────────────────
     models_dir: str = os.path.join(HOME, "robinson-models")
-    llm_model: str = "gemma-4-E2B-it.litertlm"
+    local_model_files: dict = dataclasses.field(default_factory=lambda: {
+        "e2b": "gemma-4-E2B-it.litertlm", "e4b": "gemma-4-E4B-it.litertlm"})
     llm_cache_dir: str = os.path.join(HOME, "robinson-models", "cache")
     llm_threads: int = 4
     llm_max_tokens: int = 4096          # KV cache size; conversation resets near this
