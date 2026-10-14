@@ -78,8 +78,6 @@ class Tts:
         if not re.search(r"\w", text):
             return None
         voice, multi = self.voice, self.multi
-        if self.en_voice and is_english(text):     # English sentence → native English voice
-            voice, multi = self.en_voice, False
         cfg = SynthesisConfig(
             speaker_id=MOOD_SPEAKER.get(mood, 4) if multi else None, **self.kw)
         chunks = list(voice.synthesize(text, syn_config=cfg))
