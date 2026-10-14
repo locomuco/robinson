@@ -1,0 +1,2 @@
+# Robinson may restart itself, reboot and power off the Pi by voice (after confirmation).
+@USER@ ALL=(root) NOPASSWD: /usr/bin/systemctl restart robinson, /usr/bin/systemctl restart robinson.service, /usr/sbin/reboot, /usr/sbin/poweroff

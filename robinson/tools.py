@@ -19,7 +19,7 @@ _MONAT = ["Januar", "Februar", "März", "April", "Mai", "Juni", "Juli", "August"
 
 
 def make_tools(memory: Memory, eyes: EyeCalibration | None = None, status=None,
-               settings=None, state_file: str | None = None) -> list:
+               settings=None, state_file: str | None = None, maint: bool = False) -> list:
     def uhrzeit() -> str:
         """Gibt die aktuelle Uhrzeit, den Wochentag und das Datum zurück."""
         n = datetime.datetime.now()
@@ -76,7 +76,9 @@ def make_tools(memory: Memory, eyes: EyeCalibration | None = None, status=None,
         except (OSError, json.JSONDecodeError):
             return "Unbekannt."
 
+    from .control import make_control_tools
     from .settings import make_settings_tools
     return [uhrzeit, merken, vergessen, augen_bewegen, modell_wechseln, aktuelles_modell,
             *(make_eye_tools(eyes) if eyes else []),
-            *(make_settings_tools(settings, state_file) if settings else [])]
+            *(make_settings_tools(settings, state_file) if settings else []),
+            *make_control_tools(os.path.dirname(state_file) if state_file else ".", maint)]

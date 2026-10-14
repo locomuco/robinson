@@ -16,6 +16,7 @@ import queue
 import random
 import re
 import signal
+import subprocess
 import sys
 import threading
 import time
@@ -83,6 +84,13 @@ class Robinson:
         if self.audio:
             self._render_fillers()
         self._last_filler = None
+        from .maintenance import Maintenance
+        self.maint = Maintenance(os.path.dirname(os.path.dirname(os.path.abspath(__file__))),
+                                 os.path.dirname(cfg.state_file), self._maint_done,
+                                 model=cfg.maint_model)
+        self._pending: dict | None = None    # action waiting for "Ja" (+ PIN)
+        self._announcements: queue.Queue = queue.Queue()
+        self.text_mode = False
         self._turn_user_actions: set[str] = set()
         self._turn_tools: list[str] = []
         self.utterances: queue.Queue = queue.Queue()
@@ -105,7 +113,8 @@ class Robinson:
             path = cfg.path(cfg.local_model_files.get(key, cfg.local_model_files["e2b"]))
             return LocalLlm(path, prompt, cfg.llm_threads, cfg.llm_max_tokens, cfg.llm_cache_dir,
                             tools=make_tools(self.memory, self.eye_cal, self._status,
-                                             self.settings, cfg.state_file)
+                                             self.settings, cfg.state_file,
+                                             bool(cfg.maint_pin))
                             if cfg.tools else None,
                             on_tool=self._on_tool, model_key=key)
 
@@ -159,6 +168,14 @@ class Robinson:
             self.llm.start_fresh()
         if name in EYE_TOOL_NAMES:
             self.eyes.calibration_changed()   # reloads eyes.json and shows the change
+        if name == "neustarten":
+            w = str(_args.get("was", "")).lower()
+            self._request_restart("ausschalten" if "aus" in w else
+                                  "pi" if ("pi" in w or "rechner" in w) else "robinson")
+        if name == "wartung" and _args.get("auftrag"):
+            self._request_maint(str(_args["auftrag"]))
+        if name == "wartung_rueckgaengig":
+            self._request_maint_undo()
         if name == "modell_wechseln":
             self.llm.set_mode(_args.get("ziel", ""))
         if name == "augen_bewegen":
@@ -245,6 +262,7 @@ class Robinson:
             try:
                 seg = self.utterances.get(timeout=0.5)
             except queue.Empty:
+                self._flush_announcements()
                 continue
             if self.merge_next:
                 seg = np.concatenate([self._prev_seg, np.zeros(1600, np.float32), seg])
@@ -262,8 +280,7 @@ class Robinson:
                 self.busy.clear()
                 self.eyes.set_state("idle")
                 continue
-            if target := switch_request(text):
-                self.say(self.llm.set_mode(target))
+            if self._handle_direct(text):
                 self.busy.clear()
                 self.eyes.set_state("idle")
                 continue
@@ -277,10 +294,103 @@ class Robinson:
     def say(self, text: str) -> None:
         """Speak a fixed sentence (no LLM), e.g. a mode-switch confirmation."""
         log.info("said: %s", text)
+        if self.text_mode:
+            print("Robinson:", text, flush=True)
         if self.audio and (audio := self.tts.synth(text)) is not None:
             self.audio.play(audio)
             while self.audio.playing:
                 time.sleep(0.02)
+
+    # ── things handled without the LLM ───────────────────────────────────────
+    def _handle_direct(self, text: str) -> bool:
+        """Confirmations, maintenance requests and model switches. True = handled."""
+        from .control import (RESTART_TARGETS, confirmation, maintenance_request,
+                              maintenance_undo_request, restart_request)
+        if self._pending is not None:
+            p, self._pending = self._pending, None
+            answer = confirmation(text)
+            if time.monotonic() > p["until"]:
+                self.say("Die Frage ist abgelaufen, ich habe nichts gemacht.")
+            elif answer == "yes":
+                if p["pin"] and not self._pin_ok(text):
+                    self.say("Die PIN stimmt nicht. Ich mache nichts.")
+                else:
+                    log.info("confirmed: %s", p["desc"])
+                    self.say(p["ok"])
+                    p["action"]()
+                return True
+            elif answer == "no":
+                self.say("Okay, abgebrochen.")
+                return True
+            else:
+                self.say("Gut, dann lasse ich das.")   # moved on → answer normally below
+        if what := restart_request(text):
+            self._request_restart(what)
+            self.say(f"Soll ich wirklich {RESTART_TARGETS[what]}? Sag Ja.")
+            return True
+        if maintenance_undo_request(text):
+            self._request_maint_undo()
+            self.say("Soll ich den letzten Wartungsauftrag zurücknehmen? Sag Ja und deine PIN.")
+            return True
+        if task := maintenance_request(text):
+            if self._request_maint(task):
+                self.say(f"Wartungsauftrag: {task} Sag Ja und deine PIN, dann lege ich los.")
+            else:
+                self.say("Der Wartungsmodus ist nicht eingerichtet.")
+            return True
+        if target := switch_request(text):
+            self.say(self.llm.set_mode(target))
+            return True
+        return False
+
+    def _pin_ok(self, text: str) -> bool:
+        from .control import spoken_digits
+        return bool(self.cfg.maint_pin) and self.cfg.maint_pin in spoken_digits(text)
+
+    def _set_pending(self, desc: str, action, ok: str, pin: bool = False) -> None:
+        self._pending = {"desc": desc, "action": action, "ok": ok, "pin": pin,
+                         "until": time.monotonic() + 90}
+        log.info("waiting for confirmation: %s", desc)
+
+    def _request_restart(self, what: str) -> None:
+        from .control import RESTART_TARGETS
+        self._set_pending(RESTART_TARGETS[what], lambda: self.restart(what),
+                          {"robinson": "Bis gleich!", "pi": "Ich starte den Pi neu. Bis gleich!",
+                           "ausschalten": "Gute Nacht!"}[what])
+
+    def _request_maint(self, task: str) -> bool:
+        if not self.cfg.maint_pin or not self.maint.available:
+            return False
+        self._set_pending(f"Wartung: {task}", lambda: self.maint.start(task),
+                          "Alles klar, ich gebe den Auftrag an Claude Code. Das dauert ein paar "
+                          "Minuten, ich sage Bescheid, wenn ich fertig bin.", pin=True)
+        return True
+
+    def _request_maint_undo(self) -> None:
+        self._set_pending("Wartung rückgängig", self.maint.rollback,
+                          "Okay, ich nehme den letzten Wartungsauftrag zurück.", pin=True)
+
+    def _maint_done(self, summary: str, code_changed: bool) -> None:
+        self._announcements.put((summary, code_changed))
+
+    def _flush_announcements(self) -> None:
+        while not self.busy.is_set():
+            try:
+                text, restart = self._announcements.get_nowait()
+            except queue.Empty:
+                return
+            self.say(text)
+            if restart:
+                self.say("Ich starte kurz neu, um die Änderung zu laden.")
+                self.restart("robinson")
+
+    def restart(self, what: str) -> None:
+        cmd = {"robinson": ["systemctl", "restart", "robinson"], "pi": ["reboot"],
+               "ausschalten": ["poweroff"]}[what]
+        if not os.environ.get("INVOCATION_ID"):     # not under systemd (e.g. --text tests)
+            log.info("would run: sudo %s", " ".join(cmd))
+            return
+        subprocess.Popen(["sudo", "-n", *cmd])
 
     def _update_memory(self, text: str) -> None:
         """Deterministic remember/forget from the user's words (E2B often only
@@ -390,9 +500,10 @@ class Robinson:
         self.eyes.start()
         if self.audio:
             self.audio.start()
+        self.text_mode = True
         for line in sys.stdin:
-            if target := switch_request(line):
-                print("Robinson:", self.llm.set_mode(target), flush=True)
+            self._flush_announcements()
+            if not line.strip() or self._handle_direct(line.strip()):
                 continue
             self._update_memory(line)
             if line.strip():

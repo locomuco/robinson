@@ -47,6 +47,12 @@ V=https://huggingface.co/rhasspy/piper-voices/resolve/main/de/de_DE/thorsten_emo
 fetch "$V/de_DE-thorsten_emotional-medium.onnx" "$MODELS/de_DE-thorsten_emotional-medium.onnx"
 fetch "$V/de_DE-thorsten_emotional-medium.onnx.json" "$MODELS/de_DE-thorsten_emotional-medium.onnx.json"
 
+step "sudo rule (restart / reboot / power off by voice)"
+sed "s/@USER@/$USER/" deploy/sudoers-robinson > /tmp/sudoers-robinson
+sudo visudo -cf /tmp/sudoers-robinson && \
+    sudo install -m 440 -o root -g root /tmp/sudoers-robinson /etc/sudoers.d/robinson
+rm -f /tmp/sudoers-robinson
+
 step "systemd service"
 sed -e "s|@USER@|$USER|g" -e "s|@ROOT@|$ROOT|g" deploy/robinson.service \
     | sudo tee /etc/systemd/system/robinson.service >/dev/null

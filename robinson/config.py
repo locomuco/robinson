@@ -54,11 +54,15 @@ class Config:
         "Einstell-Werkzeuge und sagst danach kurz, was du verstellt hast. Deine Stimme, "
         "Lautstärke, dein Mikrofon und dein Gesprächsverhalten kannst du mit den "
         "passenden Werkzeugen selbst ändern, wenn man dich darum bittet; nach deinem "
-        "Zustand gefragt, nutzt du systemstatus."
+        "Zustand gefragt, nutzt du systemstatus. Neu starten oder ausschalten nur mit "
+        "neustarten, eigene Code-Änderungen nur über wartung; beides führst du erst aus, "
+        "nachdem der Mensch bestätigt hat."
     )
     # NB: don't force a fixed first token (e.g. "start with an emoji") — it
     # stops Gemma from emitting tool calls.
     tools: bool = True
+    maint_pin: str = ""                 # spoken PIN for the Wartungsmodus; empty = disabled
+    maint_model: str = "sonnet"         # Claude model doing maintenance jobs
     memory_file: str = os.path.join(HOME, "robinson-data", "memory.json")
     eyes_file: str = os.path.join(HOME, "robinson-data", "eyes.json")   # servo calibration
     state_file: str = os.path.join(HOME, "robinson-data", "state.json") # e.g. chosen LLM mode
