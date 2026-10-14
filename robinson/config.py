@@ -51,7 +51,10 @@ class Config:
         "oder irgendwohin schauen nutzt du augen_bewegen, gern auch von dir aus, wenn "
         "es passt. Nur wenn dein Mensch ausdrücklich die Mechanik dauerhaft einstellen "
         "will, etwa ein Lid weiter schließen oder öfter blinzeln, nutzt du die "
-        "Einstell-Werkzeuge und sagst danach kurz, was du verstellt hast."
+        "Einstell-Werkzeuge und sagst danach kurz, was du verstellt hast. Deine Stimme, "
+        "Lautstärke, dein Mikrofon und dein Gesprächsverhalten kannst du mit den "
+        "passenden Werkzeugen selbst ändern, wenn man dich darum bittet; nach deinem "
+        "Zustand gefragt, nutzt du systemstatus."
     )
     # NB: don't force a fixed first token (e.g. "start with an emoji") — it
     # stops Gemma from emitting tool calls.
@@ -59,6 +62,7 @@ class Config:
     memory_file: str = os.path.join(HOME, "robinson-data", "memory.json")
     eyes_file: str = os.path.join(HOME, "robinson-data", "eyes.json")   # servo calibration
     state_file: str = os.path.join(HOME, "robinson-data", "state.json") # e.g. chosen LLM mode
+    settings_file: str = os.path.join(HOME, "robinson-data", "settings.json")  # voice-changed
 
     fillers: bool = True                # "Hmm." while the LLM thinks
     boot_greeting: bool = True          # say hello at startup (also warms up the LLM)

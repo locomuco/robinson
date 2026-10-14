@@ -30,14 +30,25 @@ class Tts:
         self.voice = PiperVoice.load(voice_path)
         self.multi = self.voice.config.num_speakers > 1
         self.out_rate = out_rate
-        self.robot = robot
-        self.pitch, self.tone = pitch, tone
-        mono = robotfx.monotone_factor(robot)   # robots speak flatter
-        # pitch shift speeds the audio up by `pitch`; synthesize slower to compensate
-        self.kw = dict(length_scale=length_scale * pitch, noise_scale=noise_scale * mono,
-                       noise_w_scale=noise_w_scale * mono)
+        self.base = dict(length_scale=length_scale, noise_scale=noise_scale,
+                         noise_w_scale=noise_w_scale)
+        self.configure(robot=robot, pitch=pitch, tone=tone)
         log.info("TTS voice %s (%d speakers)", voice_path.rsplit("/", 1)[-1],
                  self.voice.config.num_speakers)
+
+    def configure(self, robot: str | None = None, pitch: float | None = None,
+                  tone: str | None = None, length_scale: float | None = None) -> None:
+        """Change the voice at runtime (settings by voice); None keeps a value."""
+        if length_scale is not None:
+            self.base["length_scale"] = length_scale
+        self.robot = robot if robot is not None else getattr(self, "robot", "aus")
+        self.pitch = pitch if pitch is not None else getattr(self, "pitch", 1.0)
+        self.tone = tone if tone is not None else getattr(self, "tone", "neutral")
+        mono = robotfx.monotone_factor(self.robot)   # robots speak flatter
+        # pitch shift speeds the audio up by `pitch`; synthesize slower to compensate
+        self.kw = dict(length_scale=self.base["length_scale"] * self.pitch,
+                       noise_scale=self.base["noise_scale"] * mono,
+                       noise_w_scale=self.base["noise_w_scale"] * mono)
 
     def synth(self, text: str, mood: str = "neutral") -> np.ndarray | None:
         """Text → mono float32 at the output rate (None if nothing to say)."""

@@ -21,7 +21,10 @@ def main() -> None:
     memory = Memory(os.environ.get("ROBINSON_MEMORY_FILE", cfg.memory_file))
     server = MCPServer("robinson", instructions="Werkzeuge des Roboters Robinson.")
     eyes = EyeCalibration(os.environ.get("ROBINSON_EYES_FILE", cfg.eyes_file))
-    for fn in make_tools(memory, eyes):
+    from .settings import Settings
+    settings = Settings(os.environ.get("ROBINSON_SETTINGS_FILE") or cfg.settings_file)
+    state_file = os.environ.get("ROBINSON_STATE_FILE") or cfg.state_file
+    for fn in make_tools(memory, eyes, None, settings, state_file):
         server.add_tool(fn)
     server.run("stdio")
 

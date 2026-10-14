@@ -49,7 +49,7 @@ class ClaudeCodeLlm(Llm):
     def __init__(self, system_prompt, model: str = "haiku", memory_file: str | None = None,
                  on_tool=None, claude_bin: str | None = None, max_turns_kept: int = 20,
                  thinking: bool = False, eyes_file: str | None = None,
-                 state_file: str | None = None):
+                 state_file: str | None = None, settings_file: str | None = None):
         super().__init__(system_prompt, tools=None, on_tool=on_tool)  # tools run in the MCP server
         self.model = model
         self.thinking = thinking
@@ -62,6 +62,7 @@ class ClaudeCodeLlm(Llm):
             "env": {"ROBINSON_MEMORY_FILE": memory_file or "",
                     "ROBINSON_EYES_FILE": eyes_file or "",
                     "ROBINSON_STATE_FILE": state_file or "",
+                    "ROBINSON_SETTINGS_FILE": settings_file or "",
                     "PYTHONPATH": os.path.dirname(os.path.dirname(os.path.abspath(__file__)))},
         }}}
         self.mcp_path = os.path.join(self.workdir, "mcp.json")

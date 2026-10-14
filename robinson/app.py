@@ -53,6 +53,12 @@ _FIRST_CUT = re.compile(r"(?<=[,;:])\s+")
 class Robinson:
     def __init__(self, cfg: Config, use_audio: bool = True):
         self.cfg = cfg
+        from .settings import Settings, apply_mixer
+        self.settings = Settings(cfg.settings_file)
+        self.settings.apply_to(cfg)          # values changed by voice win over defaults
+        if use_audio:
+            apply_mixer(self.settings)
+        self._vad_rebuild = False
         from .eyecal import EyeCalibration
         self.eye_cal = EyeCalibration(cfg.eyes_file)
         self.eyes = Eyes(make_backend(cfg.eyes), self.eye_cal)
@@ -74,8 +80,8 @@ class Robinson:
                        cfg.tts_robot, cfg.tts_pitch, cfg.tts_tone)
 
         self.fillers = {}
-        if cfg.fillers and self.audio:
-            self.fillers = {k: [(p, self.tts.synth(p)) for p in v] for k, v in FILLERS.items()}
+        if self.audio:
+            self._render_fillers()
         self._last_filler = None
         self._turn_user_actions: set[str] = set()
         self._turn_tools: list[str] = []
@@ -98,7 +104,8 @@ class Robinson:
         def make_local(key: str):
             path = cfg.path(cfg.local_model_files.get(key, cfg.local_model_files["e2b"]))
             return LocalLlm(path, prompt, cfg.llm_threads, cfg.llm_max_tokens, cfg.llm_cache_dir,
-                            tools=make_tools(self.memory, self.eye_cal, self._status)
+                            tools=make_tools(self.memory, self.eye_cal, self._status,
+                                             self.settings, cfg.state_file)
                             if cfg.tools else None,
                             on_tool=self._on_tool, model_key=key)
 
@@ -106,7 +113,7 @@ class Robinson:
             from .llm_online import ClaudeCodeLlm
             return ClaudeCodeLlm(prompt, model, cfg.memory_file,
                                  on_tool=self._on_tool, eyes_file=cfg.eyes_file,
-                                 state_file=cfg.state_file,
+                                 state_file=cfg.state_file, settings_file=cfg.settings_file,
                                  thinking=cfg.online_thinking)
 
         online_ready = bool(os.environ.get("CLAUDE_CODE_OAUTH_TOKEN")) or \
@@ -119,10 +126,33 @@ class Robinson:
     def _status(self) -> str:
         return self.llm.status if hasattr(self, "llm") else ""
 
+    def _render_fillers(self) -> None:
+        self.fillers = {k: [(p, self.tts.synth(p)) for p in v] for k, v in FILLERS.items()}
+
+    def _apply_settings(self) -> None:
+        """Make settings.json (just changed by a tool) take effect immediately."""
+        from .settings import apply_mixer
+        s, cfg = self.settings, self.cfg
+        s.reload()
+        old_silence = cfg.vad_min_silence_s
+        for k in ("fillers", "barge_in", "boot_greeting", "vad_min_silence_s", "tts_pitch",
+                  "tts_tone", "tts_robot", "tts_length_scale"):
+            setattr(cfg, k, s.get(k, getattr(cfg, k)))
+        self.tts.configure(robot=cfg.tts_robot, pitch=cfg.tts_pitch, tone=cfg.tts_tone,
+                           length_scale=cfg.tts_length_scale)
+        if self.audio:
+            apply_mixer(s)
+            threading.Thread(target=self._render_fillers, daemon=True).start()
+            if cfg.vad_min_silence_s != old_silence:
+                self._vad_rebuild = True
+
     def _on_tool(self, name: str, _args: dict) -> None:
         """After any tool call (in-process or in the MCP server): pick up file changes."""
         from .eyecal import EYE_TOOL_NAMES
+        from .settings import SETTINGS_TOOL_NAMES
         self._turn_tools.append(name)
+        if name in SETTINGS_TOOL_NAMES:
+            self._apply_settings()
         if name in ("merken", "vergessen"):
             self.memory.reload()
         if name == "vergessen":
@@ -160,6 +190,9 @@ class Robinson:
                 frame = self.audio.mic.get(timeout=0.5)
             except queue.Empty:
                 continue
+            if self._vad_rebuild:               # pause length changed by voice
+                self._vad_rebuild = False
+                self.vad = self._make_vad()
             self.vad.accept_waveform(frame)
             speaking = self.vad.is_speech_detected()
 
@@ -261,7 +294,7 @@ class Robinson:
 
     def _play_filler(self, text: str) -> None:
         kind = filler_kind(text)
-        if not kind or not self.fillers:
+        if not kind or not self.fillers or not self.cfg.fillers:
             return
         choices = [f for f in self.fillers[kind] if f[0] != self._last_filler] or self.fillers[kind]
         phrase, audio = random.choice(choices)
