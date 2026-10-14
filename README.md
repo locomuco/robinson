@@ -92,6 +92,21 @@ subscription — don't share the robot's token with others; usage counts
 against your normal Claude limits. For anything beyond personal use, use an
 API key instead.
 
+## Changing Robinson by voice
+
+Settings (voice, volume, microphone, pauses, fillers, eyes, model, memory)
+have their own tools and apply immediately. Restart / power off ask for a
+spoken "Ja". Anything else goes through the **Wartungsmodus**:
+"Robinson, Wartungsmodus: …" → Robinson repeats the job → "Ja" → a Claude
+Code job (Sonnet) edits `~/robinson` on the Pi, commits only what it touched,
+reads out a summary and restarts if code changed. "Wartung rückgängig" + "Ja"
+reverts the last job. Optional: `ROBINSON_MAINT_PIN=…` additionally requires a
+spoken PIN; `ROBINSON_MAINTENANCE=false` disables the mode.
+
+`~/robinson` on the Pi is a git checkout the laptop pushes to
+(`git push pi offline`). Voice changes are commits there — always
+`git pull pi offline` before deploying so they aren't lost.
+
 ## Configuration
 
 All knobs live in `robinson/config.py`; override any of them with
