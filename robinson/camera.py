@@ -115,8 +115,11 @@ class EspEye(threading.Thread):
         h, w = img.shape[:2]
         self.detector.setInputSize((w, h))
         _, faces = self.detector.detect(img)
-        self.faces = 0 if faces is None else len(faces)
-        if not self.faces:
+        n = 0 if faces is None else len(faces)
+        if (n > 0) != (self.faces > 0) and (n == 0 or self.face_age() > 3):
+            log.info("face %s", f"seen ({n})" if n else "gone")
+        self.faces = n
+        if not n:
             return
         x, y, fw, fh = max(faces, key=lambda f: f[2] * f[3])[:4]
         cx, cy = (x + fw / 2) / w - 0.5, (y + fh / 2) / h - 0.5
