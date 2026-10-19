@@ -100,7 +100,7 @@ class Config:
     leds: bool = True                   # ReSpeaker LED ring (leds.py)
     led0_deg: float = 0.0               # array azimuth of LED 0
     led_mirror: bool = False            # LEDs are numbered against the array azimuth
-    led_brightness: float = 0.3
+    led_brightness: float = 0.15
     camera: bool = True                 # ESP-EYE on USB (esp-eye/), found by its CP210x bridge
     camera_fov_deg: float = 56.0        # horizontal field of view
     camera_mirror: bool = False
