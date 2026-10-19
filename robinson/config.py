@@ -78,6 +78,10 @@ class Config:
     settings_file: str = os.path.join(HOME, "robinson-data", "settings.json")  # voice-changed
 
     fillers: bool = True                # "Hmm." while the LLM thinks
+    tts_cloud: bool = True              # natural ElevenLabs voice if ELEVENLABS_API_KEY is set
+    elevenlabs_voice: str = "pqHfZKP75CvOlQylNhV4"   # "Bill"
+    elevenlabs_model: str = "eleven_flash_v2_5"
+    tts_cache_dir: str = os.path.join(HOME, "robinson-data", "tts-cache")
     wake_word: bool = True              # only answer when called "Robinson" …
     wake_followup_s: float = 20.0       # … or within this long after its last answer
     kws_model: str = "sherpa-onnx-kws-zipformer-gigaspeech-3.3M-2024-01-01"   # in models_dir

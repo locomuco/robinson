@@ -1,4 +1,5 @@
-"""Piper TTS in-process (piper-tts 1.8, OHF-Voice/piper1-gpl).
+"""Piper TTS in-process (piper-tts 1.8, OHF-Voice/piper1-gpl), or a natural
+cloud voice (tts_cloud.py) in front of it while that is reachable.
 
 Mood tags select a speaker of the multi-speaker thorsten_emotional voice;
 single-speaker voices ignore the mood.
@@ -79,7 +80,10 @@ def detect_language(text: str, previous: str = "de") -> str:
 class Tts:
     def __init__(self, voice_path: str, out_rate: int, length_scale=0.9,
                  noise_scale=0.8, noise_w_scale=0.9, robot: str = "aus",
-                 pitch: float = 1.0, tone: str = "neutral", en_voice_path: str | None = None):
+                 pitch: float = 1.0, tone: str = "neutral", en_voice_path: str | None = None,
+                 cloud=None):
+        self.cloud = cloud                 # e.g. tts_cloud.ElevenLabs; None = Piper only
+        self.use_cloud = cloud is not None
         self.voice = PiperVoice.load(voice_path)
         self.en_voice = None
         if en_voice_path and os.path.exists(en_voice_path):
@@ -100,6 +104,8 @@ class Tts:
         """Change the voice at runtime (settings by voice); None keeps a value."""
         if length_scale is not None:
             self.base["length_scale"] = length_scale
+        if self.cloud is not None:         # Piper's 0.9 length scale = normal cloud speed
+            self.cloud.speed = round(min(1.2, max(0.7, 0.9 / self.base["length_scale"])), 2)
         self.robot = robot if robot is not None else getattr(self, "robot", "aus")
         self.pitch = pitch if pitch is not None else getattr(self, "pitch", 1.0)
         self.tone = tone if tone is not None else getattr(self, "tone", "neutral")
@@ -116,6 +122,11 @@ class Tts:
             return None
         voice, multi = self.voice, self.multi
         english = lang == "en" if lang else is_english(text)
+        if self.use_cloud and (audio := self.cloud.synth(text, "en" if english else "de")) is not None:
+            from .tts_cloud import RATE        # pitch shift is Piper's; tone/robot apply to both
+            audio = voicefx.resample(audio, RATE, self.out_rate, 1.0)
+            audio = voicefx.tone(audio, self.out_rate, self.tone)
+            return robotfx.apply(audio, self.out_rate, self.robot)
         if self.en_voice and english:              # English reply → native English voice
             voice, multi = self.en_voice, False
         cfg = SynthesisConfig(

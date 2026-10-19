@@ -22,6 +22,7 @@ SPEC = {
     "tts_length_scale":  ("float", 0.9, 0.05, 0.7, 1.3),
     "tts_tone":          ("choice", "neutral", ("neutral", "warm", "hell"), None, None),
     "tts_robot":         ("choice", "aus", ("aus", "leicht", "mittel", "stark"), None, None),
+    "tts_cloud":         ("bool", True, None, None, None),
     "volume":            ("int", 100, 10, 10, 100),
     "mic_gain":          ("int", 80, 10, 20, 100),
     "fillers":           ("bool", True, None, None, None),
@@ -167,8 +168,8 @@ def make_settings_tools(settings: Settings, state_file: str | None = None) -> li
         """Ändert deine Stimme dauerhaft.
 
         Args:
-          eigenschaft: "tonhoehe", "klang", "roboter" oder "tempo".
-          wert: tonhoehe: "höher"/"tiefer"/"normal"; klang: "neutral"/"warm"/"hell"; roboter: "aus"/"leicht"/"mittel"/"stark"; tempo: "schneller"/"langsamer"/"normal".
+          eigenschaft: "tonhoehe", "klang", "roboter", "tempo" oder "natuerlich" (natürliche Online-Stimme statt der eingebauten).
+          wert: tonhoehe: "höher"/"tiefer"/"normal"; klang: "neutral"/"warm"/"hell"; roboter: "aus"/"leicht"/"mittel"/"stark"; tempo: "schneller"/"langsamer"/"normal"; natuerlich: "an"/"aus".
         """
         e, w = eigenschaft.lower(), wert.lower().strip()
         if e.startswith("ton"):
@@ -189,6 +190,12 @@ def make_settings_tools(settings: Settings, state_file: str | None = None) -> li
                 return "Roboter-Effekt muss aus, leicht, mittel oder stark sein."
             settings.set("tts_robot", w)
             return f"Roboter-Effekt ist jetzt {w}."
+        if e.startswith("nat"):
+            up = _up(w)
+            if up is None:
+                return "Wert muss an oder aus sein."
+            settings.set("tts_cloud", up)
+            return "Natürliche Stimme ist jetzt " + ("an." if up else "aus, ich spreche mit der eingebauten Stimme.")
         if e.startswith("tempo"):
             if "normal" in w:
                 settings.set("tts_length_scale", 0.9)
@@ -198,7 +205,7 @@ def make_settings_tools(settings: Settings, state_file: str | None = None) -> li
                 return "Wert muss schneller, langsamer oder normal sein."
             # length_scale: smaller = faster
             return f"Sprechtempo eingestellt ({settings.step('tts_length_scale', not up):.2f})."
-        return "Eigenschaft muss tonhoehe, klang, roboter oder tempo sein."
+        return "Eigenschaft muss tonhoehe, klang, roboter, tempo oder natuerlich sein."
 
     def lautstaerke_einstellen(wert: str) -> str:
         """Ändert die Lautstärke deines Lautsprechers.

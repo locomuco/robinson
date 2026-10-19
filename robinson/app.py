@@ -96,10 +96,16 @@ class Robinson:
                     self.kws = WakeWord(cfg.path(cfg.kws_model), cfg.kws_threshold)
                 except Exception as e:  # noqa: BLE001
                     log.warning("wake word spotter unavailable: %s", e)
+        cloud = None
+        if os.environ.get("ELEVENLABS_API_KEY"):
+            from .tts_cloud import ElevenLabs
+            cloud = ElevenLabs(os.environ["ELEVENLABS_API_KEY"], cfg.elevenlabs_voice,
+                               cfg.elevenlabs_model, cfg.tts_cache_dir)
         self.tts = Tts(cfg.path(cfg.tts_voice), self.audio.rate if self.audio else 48_000,
                        cfg.tts_length_scale, cfg.tts_noise_scale, cfg.tts_noise_w_scale,
                        cfg.tts_robot, cfg.tts_pitch, cfg.tts_tone,
-                       en_voice_path=cfg.path(cfg.tts_voice_en))
+                       en_voice_path=cfg.path(cfg.tts_voice_en), cloud=cloud)
+        self.tts.use_cloud = cloud is not None and cfg.tts_cloud
 
         self.fillers = {}
         if self.audio:
@@ -199,6 +205,8 @@ class Robinson:
             setattr(cfg, k, s.get(k, getattr(cfg, k)))
         self.tts.configure(robot=cfg.tts_robot, pitch=cfg.tts_pitch, tone=cfg.tts_tone,
                            length_scale=cfg.tts_length_scale)
+        cfg.tts_cloud = s.get("tts_cloud", cfg.tts_cloud)
+        self.tts.use_cloud = self.tts.cloud is not None and cfg.tts_cloud
         if self.audio:
             apply_mixer(s)
             threading.Thread(target=self._render_fillers, daemon=True).start()
