@@ -117,7 +117,8 @@ class Eyes(threading.Thread):
         self._sleep_now = False            # "schlaf ein": sleep until spoken to
         self._expr_until = 0.0             # temporary lid expression (große Augen …)
         self._expr_openness = 1.0
-        self._look: float | None = None    # room azimuth of a voice (+ = left), see look_at
+        self._look: float | None = None    # room azimuth of a voice/face (+ = left), see look_at
+        self._look_el: float | None = None # elevation of a face (+ = up), if known
         self._look_t = 0.0
 
     # ── public API (thread-safe, non-blocking) ───────────────────────────────
@@ -131,10 +132,15 @@ class Eyes(threading.Thread):
     def state(self) -> str:
         return self._state
 
-    def look_at(self, azimuth: float) -> None:
-        """Turn the eyes towards a voice: azimuth in degrees, 0 = ahead, + = left."""
+    def look_at(self, azimuth: float, elevation: float | None = None) -> None:
+        """Turn the eyes towards a voice or face: degrees, 0 = ahead, + = left / up."""
         with self._lock:
-            self._look, self._look_t = azimuth, time.monotonic()
+            self._look, self._look_el, self._look_t = azimuth, elevation, time.monotonic()
+
+    def attention(self) -> None:
+        """Someone is there (e.g. a face): don't fall asleep, wake up."""
+        with self._lock:
+            self._last_activity = time.monotonic()
 
     def set_mood(self, mood: str) -> None:
         if mood in MOODS:
@@ -268,8 +274,13 @@ class Eyes(threading.Thread):
                 g = self.cal.gaze("lr")
                 edge = g["links"] if look > 0 else g["rechts"]
                 lr = lr_c + (edge - lr_c) * min(1.0, abs(look) / 90) * 0.9
-                if abs(self._pos.get(LR, lr_c) - lr) > 3:
-                    self._gaze(lr, ud_c)
+                ud = ud_c
+                if (el := self._look_el) is not None:
+                    gu = self.cal.gaze("ud")
+                    edge = gu["oben"] if el > 0 else gu["unten"]
+                    ud = ud_c + (edge - ud_c) * min(1.0, abs(el) / 45) * 0.9
+                if abs(self._pos.get(LR, lr_c) - lr) > 3 or abs(self._pos.get(UD, ud_c) - ud) > 3:
+                    self._gaze(lr, ud)
                 next_saccade = now + random.uniform(1.0, 2.5)
             elif now >= next_saccade and now >= self._hold_gaze_until:
                 if state == "thinking":

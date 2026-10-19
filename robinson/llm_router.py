@@ -239,8 +239,15 @@ class LlmRouter:
                           for m in missed)
         return f"(Was inzwischen gesagt wurde:\n{lines})\n\n"
 
-    def chat(self, text: str) -> Iterator[tuple[str, str]]:
+    def chat(self, text: str, image: bytes | None = None) -> Iterator[tuple[str, str]]:
+        """image: a JPEG from the camera for this turn (only Claude can look at it)."""
         b = self._pick()
+        if image is not None:
+            if b is self.online:
+                b.pending_image = image
+            else:
+                text = ("(Du hast gerade kein Bild: mit dem lokalen Modell kannst du nicht "
+                        "sehen. Sag das kurz.) " + text)
         if self._announce:
             yield "text", self._announce + " "
             self._announce = None
@@ -268,6 +275,8 @@ class LlmRouter:
             handed_over = bool(prefix)
             yield from b.chat(prefix + text)
         finally:
+            if image is not None and self.online is not None:
+                self.online.pending_image = None     # never carry a photo into a later turn
             if handed_over:
                 # store what the human said, not the context block we prepended
                 for m in reversed(b.history):

@@ -46,6 +46,16 @@ fi
 V=https://huggingface.co/rhasspy/piper-voices/resolve/main/de/de_DE/thorsten_emotional/medium
 fetch "$V/de_DE-thorsten_emotional-medium.onnx" "$MODELS/de_DE-thorsten_emotional-medium.onnx"
 fetch "$V/de_DE-thorsten_emotional-medium.onnx.json" "$MODELS/de_DE-thorsten_emotional-medium.onnx.json"
+V=https://huggingface.co/rhasspy/piper-voices/resolve/main/en/en_US/ryan/medium
+fetch "$V/en_US-ryan-medium.onnx" "$MODELS/en_US-ryan-medium.onnx"
+fetch "$V/en_US-ryan-medium.onnx.json" "$MODELS/en_US-ryan-medium.onnx.json"
+KWS=sherpa-onnx-kws-zipformer-gigaspeech-3.3M-2024-01-01        # wake word "Robinson"
+if [ ! -d "$MODELS/$KWS" ]; then
+    curl -fL --progress-bar "https://github.com/k2-fsa/sherpa-onnx/releases/download/kws-models/$KWS.tar.bz2" \
+        | tar xj -C "$MODELS"
+fi
+fetch https://github.com/opencv/opencv_zoo/raw/main/models/face_detection_yunet/face_detection_yunet_2023mar.onnx \
+      "$MODELS/face_detection_yunet_2023mar.onnx"                # faces for the camera
 
 step "sudo rule (restart / reboot / power off by voice)"
 sed "s/@USER@/$USER/" deploy/sudoers-robinson > /tmp/sudoers-robinson

@@ -101,6 +101,10 @@ class Config:
     led0_deg: float = 0.0               # array azimuth of LED 0
     led_mirror: bool = False            # LEDs are numbered against the array azimuth
     led_brightness: float = 0.3
+    camera: bool = True                 # ESP-EYE on USB (esp-eye/), found by its CP210x bridge
+    camera_fov_deg: float = 56.0        # horizontal field of view
+    camera_mirror: bool = False
+    face_model: str = "face_detection_yunet_2023mar.onnx"   # in models_dir
     aec: bool = True                    # WebRTC echo cancellation (if available)
     aec_delay_ms: int = 60              # speaker→mic latency hint for AEC
     output_gain: float = 1.0

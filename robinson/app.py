@@ -51,6 +51,10 @@ _USER_ACTIONS = [
     (re.compile(r"\baugen (auf|öffnen)|\bmach\w* (die|deine) augen auf"), "augen auf"),
 ]
 _FIRST_CUT = re.compile(r"(?<=[,;:])\s+")
+# asking Robinson to look at something: the reply gets a camera photo
+_LOOK = re.compile(r"\b(was siehst du|was kannst du sehen|siehst du|kannst du \w+ sehen|schau (dir )?mal|"
+                   r"guck (dir )?mal|sieh (dir )?mal|wie sehe ich aus|was (halte|trage|habe) ich|"
+                   r"erkennst du|what do you see|can you see|do you see|look at|how do i look)\b", re.I)
 
 
 class Robinson:
@@ -129,6 +133,16 @@ class Robinson:
             from .leds import Leds
             self.leds = Leds(lambda: (self.eyes.state, self.awake), cfg.led0_deg,
                              cfg.led_mirror, cfg.led_brightness)
+        self.camera = None
+        if use_audio and cfg.camera:
+            from .camera import EspEye, find_port
+            if (port := find_port()) and os.path.exists(cfg.path(cfg.face_model)):
+                try:
+                    self.camera = EspEye(port, cfg.path(cfg.face_model), cfg.camera_fov_deg,
+                                         cfg.camera_mirror)
+                    self.camera.on_face = self._on_face
+                except Exception as e:  # noqa: BLE001
+                    log.warning("camera unavailable: %s", e)
         self.utterances: queue.Queue = queue.Queue()
         self.busy = threading.Event()        # a reply is being produced/played
         self.cancel = threading.Event()      # barge-in: abandon current reply
@@ -186,7 +200,13 @@ class Robinson:
         log.debug("voice from %.0f° (array %.0f°, strength %.2f)", room, az_array, strength)
         if self.leds:
             self.leds.direction(az_array, strength)
-        self.eyes.look_at(room)
+        if self.camera is None or self.camera.face_age() > 1.5:   # a seen face beats a voice
+            self.eyes.look_at(room)
+
+    def _on_face(self, azimuth: float, elevation: float, _size: float) -> None:
+        """The camera sees a face (camera thread): look at it."""
+        self.eyes.look_at(azimuth, elevation)
+        self.eyes.attention()
 
     def _status(self) -> str:
         return self.llm.status if hasattr(self, "llm") else ""
@@ -562,7 +582,13 @@ class Robinson:
         hint = "(Please answer in English.) " if lang == "en" else "(Antworte auf Deutsch.) "
         if self.speaker:
             hint += f"(Es spricht gerade {self.speaker}.) "
-        stream = self.llm.chat(hint + text)
+        image = None
+        if self.camera is not None and _LOOK.search(text):
+            image = self.camera.snapshot()
+            log.info("camera photo for this turn: %s", f"{len(image)} bytes" if image else "none")
+            if image:
+                hint += "(Dazu ein Foto deiner Kamera, das zeigt, was du gerade siehst.) "
+        stream = self.llm.chat(hint + text, image=image) if image else self.llm.chat(hint + text)
         t_tok = None
         for kind, val in stream:
             if t_tok is None:
@@ -604,6 +630,8 @@ class Robinson:
         self.eyes.start()
         if self.leds:
             self.leds.start()
+        if self.camera:
+            self.camera.start()
         self.audio.start()
         if self.cfg.boot_greeting:
             # also prefills the system prompt, so the first real answer is fast
@@ -638,6 +666,8 @@ class Robinson:
         self.eyes.stop()
         if self.leds:
             self.leds.stop()
+        if self.camera:
+            self.camera.stop()
         if self.audio:
             self.audio.close()
 

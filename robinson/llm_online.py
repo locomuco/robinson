@@ -154,7 +154,14 @@ class ClaudeCodeLlm(Llm):
     def _stream(self, text):
         if self.proc is None or self.proc.poll() is not None:
             self._open(self.history[:-1])
-        msg = {"type": "user", "message": {"role": "user", "content": text}}
+        content = text
+        if (img := getattr(self, "pending_image", None)) is not None:   # camera photo
+            import base64
+            self.pending_image = None
+            content = [{"type": "image", "source": {"type": "base64", "media_type": "image/jpeg",
+                                                    "data": base64.b64encode(img).decode()}},
+                       {"type": "text", "text": text}]
+        msg = {"type": "user", "message": {"role": "user", "content": content}}
         try:
             self.proc.stdin.write((json.dumps(msg, ensure_ascii=False) + "\n").encode())
             self.proc.stdin.flush()

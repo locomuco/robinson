@@ -17,6 +17,8 @@ dependencies = [
     "adafruit-blinka>=8.50",
     "rpi-lgpio>=0.6; platform_machine == 'aarch64'",  # RPi.GPIO shim for the Pi 5
     "mcp>=2.0",                              # tool server for the online (Claude Code) backend
+    "pyserial>=3.5",                         # ESP-EYE camera on USB serial
+    "opencv-python-headless>=4.10",          # face detection (YuNet)
 ]
 
 [project.optional-dependencies]
