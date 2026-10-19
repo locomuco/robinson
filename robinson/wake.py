@@ -6,8 +6,10 @@ sound of the word itself. The transcript check in app.py stays as a second
 way in.
 """
 
+import difflib
 import logging
 import os
+import re
 
 import numpy as np
 
@@ -43,3 +45,34 @@ class WakeWord:
                 hit = True
                 self.kws.reset_stream(self.stream)
         return hit
+
+
+_GREET = {"hey", "hi", "hallo", "hello", "he", "ok", "okay", "na"}
+
+
+def _windows(words: list[str]):
+    for n in (1, 2, 3):
+        for i in range(len(words) - n + 1):
+            yield i, i + n, "".join(words[i:i + n])
+
+
+def find_wake_word(text: str) -> tuple[int, int, int] | None:
+    """(start, end, word count) of something that sounds like "Robinson" in a
+    transcript, else None. Joins neighbouring words: the STT splits the name
+    ("Robin Sohn", "Robin's on") or bends it ("Probizon", "Robinsohn")."""
+    words = [w.replace("'", "") for w in re.findall(r"[a-zäöüß']+", text.lower())]
+    for i, j, w in _windows(words):
+        if len(w) >= 7 and max(difflib.SequenceMatcher(None, w, ref).ratio()
+                               for ref in ("robinson", "robinsohn")) >= 0.75:
+            return i, j, len(words)
+    return None
+
+
+def only_wake_word(text: str) -> bool:
+    """Just "Robinson?" / "Hey Robinson!" - a call, not yet a request."""
+    m = find_wake_word(text)
+    if m is None:
+        return False
+    i, j, n = m
+    words = re.findall(r"[a-zäöüß']+", text.lower())
+    return j == n and all(w in _GREET for w in words[:i])

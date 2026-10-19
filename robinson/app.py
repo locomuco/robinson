@@ -51,8 +51,6 @@ _USER_ACTIONS = [
     (re.compile(r"\baugen (auf|öffnen)|\bmach\w* (die|deine) augen auf"), "augen auf"),
 ]
 _FIRST_CUT = re.compile(r"(?<=[,;:])\s+")
-# the wake word as the STT tends to spell it
-_WAKE = re.compile(r"\W*\b(robb?ins[oe]h?n|robison|robin'?s?\s?s?[oe]h?n)\b\W*", re.I)
 
 
 class Robinson:
@@ -172,7 +170,8 @@ class Robinson:
     def _addressed(self, text: str) -> bool:
         if not self.cfg.wake_word or self.text_mode or self.awake:
             return True
-        return bool(_WAKE.search(text))
+        from .wake import find_wake_word
+        return find_wake_word(text) is not None
 
     def _on_doa(self, az_array: float, strength: float) -> None:
         """Mic array located a voice (audio worker thread)."""
@@ -342,7 +341,8 @@ class Robinson:
                 self.busy.clear()
                 self.eyes.set_state("idle")
                 continue
-            if _WAKE.fullmatch(text.strip()) or (   # just "Robinson?"
+            from .wake import only_wake_word
+            if only_wake_word(text) or (            # just "Robinson?"
                     len(text.split()) <= 2 and time.monotonic() - self.wake_t < len(seg) / 16e3 + 3):
                 self.say("Yes?" if self.lang == "en" else "Ja?")
                 self._end_turn()
