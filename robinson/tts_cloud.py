@@ -56,7 +56,7 @@ class ElevenLabs:
         except (urllib.error.URLError, TimeoutError, OSError) as e:
             detail = e.read()[:200].decode(errors="replace") if isinstance(e, urllib.error.HTTPError) else e
             log.warning("ElevenLabs failed (%s) - Piper speaks for a minute", detail)
-            self.down_until = time.monotonic() + 60
+            self.down_until = time.monotonic() + (1800 if "quota_exceeded" in str(detail) else 60)
             return None
         audio = np.frombuffer(pcm, np.int16).astype(np.float32) / 32768
         log.debug("elevenlabs %.2fs: %s", time.monotonic() - t0, text[:40])

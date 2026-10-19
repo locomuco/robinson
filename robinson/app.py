@@ -110,6 +110,7 @@ class Robinson:
                        cfg.tts_robot, cfg.tts_pitch, cfg.tts_tone,
                        en_voice_path=cfg.path(cfg.tts_voice_en), cloud=cloud)
         self.tts.use_cloud = cloud is not None and cfg.tts_cloud
+        self.tts.auto_cloud = lambda: self.llm.mode == "online" and self.llm._online_ok
 
         self.fillers = {}
         if self.audio:

@@ -84,6 +84,7 @@ class Tts:
                  cloud=None):
         self.cloud = cloud                 # e.g. tts_cloud.ElevenLabs; None = Piper only
         self.use_cloud = cloud is not None
+        self.auto_cloud = None             # callable: True while thinking online → cloud voice regardless of setting
         self.voice = PiperVoice.load(voice_path)
         self.en_voice = None
         if en_voice_path and os.path.exists(en_voice_path):
@@ -122,7 +123,8 @@ class Tts:
             return None
         voice, multi = self.voice, self.multi
         english = lang == "en" if lang else is_english(text)
-        if self.use_cloud and (audio := self.cloud.synth(text, "en" if english else "de")) is not None:
+        if self.cloud is not None and (self.use_cloud or (self.auto_cloud and self.auto_cloud())) \
+                and (audio := self.cloud.synth(text, "en" if english else "de")) is not None:
             from .tts_cloud import RATE        # pitch shift is Piper's; tone/robot apply to both
             audio = voicefx.resample(audio, RATE, self.out_rate, 1.0)
             audio = voicefx.tone(audio, self.out_rate, self.tone)
