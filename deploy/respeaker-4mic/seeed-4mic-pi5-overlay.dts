@@ -1,0 +1,98 @@
+/dts-v1/;
+/plugin/;
+/*
+ * ReSpeaker 4-Mic Array (one AC108 at i2c1 0x3b) on a Raspberry Pi 5.
+ *
+ * RP1's I2S has no TDM, so it cannot receive the AC108's 4-slot DSP_A frame.
+ * The AC108 still needs a capture stream on the seeed card to start its clocks
+ * (the codec-clock heartbeat, see install.sh); the audio itself is read from
+ * GPIO20 by an RP1 PIO state machine (snd-pio-tdm, card "seeed4micpio").
+ *
+ * Compile (install.sh does this):
+ *   cpp -nostdinc -I <headers>/include -I <common headers>/include -undef \
+ *       -x assembler-with-cpp seeed-4mic-pi5-overlay.dts | dtc -@ -H epapr -O dtb -o seeed-4mic-pi5.dtbo -
+ */
+#include <dt-bindings/mfd/rp1.h>
+/ {
+	compatible = "brcm,bcm2712";
+
+	fragment@0 {	/* CPU DAI: DesignWare I2S1, clock consumer (the AC108 is bus master) */
+		target = <&i2s_clk_consumer>;
+		__overlay__ {
+			#sound-dai-cells = <0>;
+			status = "okay";
+		};
+	};
+
+	fragment@1 {	/* the board's 24 MHz crystal */
+		target-path = "/";
+		__overlay__ {
+			ac108_mclk: codec-mclk {
+				compatible = "fixed-clock";
+				#clock-cells = <0>;
+				clock-frequency = <24000000>;
+			};
+		};
+	};
+
+	fragment@2 {
+		target = <&i2c1>;
+		__overlay__ {
+			#address-cells = <1>;
+			#size-cells = <0>;
+			status = "okay";
+
+			ac108_a: ac108@3b {
+				compatible = "x-power,ac108_0";
+				reg = <0x3b>;
+				#sound-dai-cells = <0>;
+				data-protocol = <0>;
+			};
+		};
+	};
+
+	fragment@3 {	/* control plane + heartbeat card "seeed4micvoicec" */
+		target = <&sound>;
+		sound_overlay: __overlay__ {
+			compatible = "seeed-voicecard";
+			seeed-voice-card,format = "dsp_a";
+			seeed-voice-card,name = "seeed-4mic-voicecard";
+			status = "okay";
+
+			seeed-voice-card,bitclock-master = <&codec_dai>;
+			seeed-voice-card,frame-master = <&codec_dai>;
+			seeed-voice-card,channels-playback-override = <4>;
+			seeed-voice-card,channels-capture-override  = <4>;
+
+			cpu_dai: seeed-voice-card,cpu {
+				sound-dai = <&i2s_clk_consumer>;
+				dai-tdm-slot-num     = <2>;
+				dai-tdm-slot-width   = <32>;
+				dai-tdm-slot-tx-mask = <1 1 0 0>;
+				dai-tdm-slot-rx-mask = <1 1 0 0>;
+			};
+			codec_dai: seeed-voice-card,codec {
+				sound-dai = <&ac108_a>;
+				clocks = <&ac108_mclk>;
+			};
+		};
+	};
+
+	fragment@4 {	/* audio path: snd-pio-tdm, child of &rp1 for RP1's dma-ranges */
+		target = <&rp1>;
+		__overlay__ {
+			snd_pio_tdm: snd-pio-tdm {
+				compatible = "seeed,snd-pio-tdm";
+				pio = <&rp1_pio>;
+				/* parsed only: I2S1 keeps the pins, PIO just reads the pads */
+				bclk-gpios = <&rp1_gpio 18 0>;
+				ws-gpios   = <&rp1_gpio 19 0>;
+				sdi-gpios  = <&rp1_gpio 20 0>;
+				/* capture only; 0x100 = "heavy" burst-8 channel; CH0_RX -> SM0 */
+				dmas = <&rp1_dma (RP1_DMA_PIO_CH0_RX | 0x100)>;
+				dma-names = "rx";
+				status = "okay";
+			};
+		};
+	};
+};

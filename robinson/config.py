@@ -83,6 +83,9 @@ class Config:
     # ── audio ────────────────────────────────────────────────────────────────
     audio_device: str = "USB Audio"     # substring of the PortAudio device name
     audio_rate: int = 48_000            # device rate (C-Media USB adapter)
+    mic_device: str = "seeed4micpio"    # separate mic card (ReSpeaker 4-Mic via RP1 PIO,
+                                        # deploy/respeaker-4mic); "" or missing = audio_device
+    mic_channels: int = 4
     aec: bool = True                    # WebRTC echo cancellation (if available)
     aec_delay_ms: int = 60              # speaker→mic latency hint for AEC
     output_gain: float = 1.0

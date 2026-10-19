@@ -1,9 +1,15 @@
-"""Full-duplex audio on the USB adapter with optional echo cancellation.
+"""Audio I/O with optional echo cancellation.
 
-One PortAudio stream drives both directions at the device rate, so every mic
-block comes paired with exactly the samples played at that moment — the
-reference WebRTC AEC needs to subtract Robinson's own voice from the mic.
-The callback only moves buffers; decimation, AEC and VAD run in a worker.
+Duplex mode (USB adapter only): one PortAudio stream drives both directions
+at the device rate, so every mic block comes paired with exactly the samples
+played at that moment — the reference WebRTC AEC needs to subtract Robinson's
+own voice from the mic.
+
+Split mode (mic_device found, e.g. the ReSpeaker 4-Mic on the PIO card): the
+mic array records 16 kHz multichannel on its own stream and is mixed to mono;
+the speaker plays on the USB adapter, or nowhere if it is missing. Mic and
+reference are paired by arrival; WebRTC's delay estimation covers the rest.
+The callbacks only move buffers; decimation, AEC and VAD run in a worker.
 
 Output: play() appends mono float32 at the device rate; flush() drops
 everything queued (barge-in). Input: 16 kHz mono float32 frames of 10 ms on
@@ -14,6 +20,7 @@ import collections
 import logging
 import queue
 import threading
+import time
 
 import numpy as np
 import sounddevice as sd
@@ -63,17 +70,27 @@ class _Aec:
         return np.frombuffer(f.data, np.int16).astype(np.float32) / 32768
 
 
-def find_device(name: str) -> int:
+def find_device(name: str, need_in: bool = True, need_out: bool = True) -> int:
     for i, d in enumerate(sd.query_devices()):
-        if name.lower() in d["name"].lower() and d["max_input_channels"] > 0 \
-                and d["max_output_channels"] > 0:
+        if name and name.lower() in d["name"].lower() \
+                and (not need_in or d["max_input_channels"] > 0) \
+                and (not need_out or d["max_output_channels"] > 0):
             return i
-    raise RuntimeError(f"no duplex audio device matching {name!r}:\n{sd.query_devices()}")
+    kind = "duplex" if need_in and need_out else "input" if need_in else "output"
+    raise RuntimeError(f"no {kind} audio device matching {name!r}:\n{sd.query_devices()}")
+
+
+def _try_device(name: str, need_in: bool, need_out: bool) -> int | None:
+    try:
+        return find_device(name, need_in, need_out)
+    except RuntimeError:
+        return None
 
 
 class AudioIO:
     def __init__(self, device: str, rate: int = 48_000, aec: bool = True,
-                 aec_delay_ms: int = 60, gain: float = 1.0):
+                 aec_delay_ms: int = 60, gain: float = 1.0, mic_device: str = "",
+                 mic_channels: int = 4):
         self.rate = rate
         self.block = rate // 50                   # 20 ms device blocks
         self.gain = gain
@@ -91,12 +108,32 @@ class AudioIO:
                 log.info("echo cancellation on (WebRTC)")
             except Exception as e:
                 log.warning("echo cancellation unavailable: %s", e)
-        dev = find_device(device)
-        out_ch = min(2, sd.query_devices(dev)["max_output_channels"])
-        self.stream = sd.Stream(
-            device=(dev, dev), samplerate=rate, blocksize=self.block,
-            channels=(1, out_ch), dtype="float32", callback=self._callback,
-            latency="high")              # survive LLM prefill bursts on all cores
+        self.streams: list = []
+        self._null_out = False
+        mic = _try_device(mic_device, True, False) if mic_device else None
+        if mic is None:
+            if mic_device:
+                log.warning("mic device %r not found, using the mic of %r", mic_device, device)
+            dev = find_device(device)
+            out_ch = min(2, sd.query_devices(dev)["max_output_channels"])
+            self.streams.append(sd.Stream(
+                device=(dev, dev), samplerate=rate, blocksize=self.block,
+                channels=(1, out_ch), dtype="float32", callback=self._callback,
+                latency="high"))         # survive LLM prefill bursts on all cores
+        else:
+            self.mic_channels = mic_channels
+            self.streams.append(sd.InputStream(
+                device=mic, samplerate=SR, blocksize=SR // 50, channels=mic_channels,
+                dtype="int32", callback=self._in_callback, latency="high"))
+            out = _try_device(device, False, True)
+            if out is None:
+                log.warning("no speaker matching %r - playing into the void", device)
+                self._null_out = True
+            else:
+                out_ch = min(2, sd.query_devices(out)["max_output_channels"])
+                self.streams.append(sd.OutputStream(
+                    device=out, samplerate=rate, blocksize=self.block, channels=out_ch,
+                    dtype="float32", callback=self._out_callback, latency="high"))
         self._dec_mic, self._dec_ref = _Decimator(rate // SR), _Decimator(rate // SR)
         self._raw_peak = 0.0
         self._stop = threading.Event()
@@ -104,12 +141,17 @@ class AudioIO:
 
     def start(self) -> None:
         self._worker.start()
-        self.stream.start()
-        log.info("audio running on %s @ %d Hz", self.stream.device, self.rate)
+        for st in self.streams:
+            st.start()
+        if self._null_out:
+            threading.Thread(target=self._null_output, name="null-out", daemon=True).start()
+        log.info("audio running on %s, output @ %d Hz",
+                 ", ".join(str(st.device) for st in self.streams), self.rate)
 
     def close(self) -> None:
         self._stop.set()
-        self.stream.close()
+        for st in self.streams:
+            st.close()
 
     # ── output ───────────────────────────────────────────────────────────────
     def play(self, audio: np.ndarray) -> None:
@@ -155,8 +197,31 @@ class AudioIO:
             log.debug("audio status: %s", status)
         ref = self._pull(frames)
         outdata[:] = ref[:, None]
+        self._put(("duplex", indata[:, 0].copy(), ref))
+
+    def _in_callback(self, indata, frames, _time, status):
+        if status:
+            log.debug("mic status: %s", status)
+        self._put(("mic", indata.copy()))
+
+    def _out_callback(self, outdata, frames, _time, status):
+        if status:
+            log.debug("speaker status: %s", status)
+        ref = self._pull(frames)
+        outdata[:] = ref[:, None]
+        self._put(("ref", ref))
+
+    def _null_output(self) -> None:
+        """No speaker: consume the output queue in real time so `playing` still ends."""
+        t = time.monotonic()
+        while not self._stop.is_set():
+            self._put(("ref", self._pull(self.block)))
+            t += self.block / self.rate
+            time.sleep(max(0.0, t - time.monotonic()))
+
+    def _put(self, item) -> None:
         try:
-            self._raw.put_nowait((indata[:, 0].copy(), ref))
+            self._raw.put_nowait(item)
         except queue.Full:
             pass
 
@@ -166,15 +231,29 @@ class AudioIO:
         ref_buf = np.zeros(0, np.float32)
         while not self._stop.is_set():
             try:
-                mic, ref = self._raw.get(timeout=0.5)
+                kind, *data = self._raw.get(timeout=0.5)
             except queue.Empty:
                 continue
+            if kind == "ref":
+                ref_buf = np.concatenate([ref_buf, self._dec_ref(data[0])])[-SR // 4:]
+                continue
+            if kind == "duplex":
+                mic = data[0]
+                ref_buf = np.concatenate([ref_buf, self._dec_ref(data[1])])
+                mic_buf = np.concatenate([mic_buf, self._dec_mic(mic)])
+            else:                                 # array frames: int32 → mono float
+                mic = data[0].mean(axis=1, dtype=np.float64).astype(np.float32) / 2**31
+                mic_buf = np.concatenate([mic_buf, mic])
             self._raw_peak = max(self._raw_peak, float(np.sqrt(np.mean(mic ** 2))))
-            mic_buf = np.concatenate([mic_buf, self._dec_mic(mic)])
-            ref_buf = np.concatenate([ref_buf, self._dec_ref(ref)])
-            while len(mic_buf) >= FRAME and len(ref_buf) >= FRAME:
+            while len(mic_buf) >= FRAME:
                 m, mic_buf = mic_buf[:FRAME], mic_buf[FRAME:]
-                r, ref_buf = ref_buf[:FRAME], ref_buf[FRAME:]
+                if len(ref_buf) >= FRAME:
+                    r, ref_buf = ref_buf[:FRAME], ref_buf[FRAME:]
+                elif kind == "duplex":
+                    mic_buf = np.concatenate([m, mic_buf])
+                    break
+                else:
+                    r = np.zeros(FRAME, np.float32)
                 if self.aec is not None:
                     m = self.aec(m, r)
                 if self.mic.full():

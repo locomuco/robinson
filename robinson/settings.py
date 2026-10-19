@@ -88,8 +88,8 @@ def _usb_card() -> str:
     return "0"
 
 
-def set_mixer(control: str, percent: int, capture: bool = False) -> bool:
-    cmd = ["amixer", "-q", "-c", _usb_card(), "sset", control, f"{percent}%"]
+def set_mixer(control: str, percent: int, capture: bool = False, card: str | None = None) -> bool:
+    cmd = ["amixer", "-q", "-c", card or _usb_card(), "sset", control, f"{percent}%"]
     if capture:
         cmd.append("capture")
     ok = subprocess.run(cmd, capture_output=True).returncode == 0
@@ -98,9 +98,17 @@ def set_mixer(control: str, percent: int, capture: bool = False) -> bool:
     return ok
 
 
+RESPEAKER_CARD = "seeed4micvoicec"     # AC108 control card of the ReSpeaker 4-Mic Array
+
+
 def apply_mixer(settings: Settings) -> None:
     set_mixer("Speaker", int(settings.get("volume")))
-    set_mixer("Mic", int(settings.get("mic_gain")), capture=True)
+    gain = int(settings.get("mic_gain"))
+    if os.path.exists(f"/proc/asound/{RESPEAKER_CARD}"):
+        for ch in range(1, 5):          # AC108 PGA 0..31 dB
+            set_mixer(f"ADC{ch} PGA gain", gain, card=RESPEAKER_CARD)
+    else:
+        set_mixer("Mic", gain, capture=True)
 
 
 # ── system status ────────────────────────────────────────────────────────────

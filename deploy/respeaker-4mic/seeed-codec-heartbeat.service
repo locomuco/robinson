@@ -1,0 +1,16 @@
+[Unit]
+Description=ReSpeaker 4-Mic codec clock heartbeat (keeps the AC108 clocks running for snd-pio-tdm)
+After=sound.target systemd-modules-load.service
+
+[Service]
+Type=simple
+# the card sits behind PCIe (RP1) and probes late
+ExecStartPre=/bin/sh -c 'for i in $(seq 1 40); do [ -e /proc/asound/seeed4micvoicec ] && exit 0; sleep 0.5; done; echo "seeed4micvoicec not present after 20 s" >&2; exit 1'
+# the first stream after boot sets the AC108 frame: 4 x 32 bit, 16 kHz
+ExecStart=/usr/bin/arecord -q -D hw:CARD=seeed4micvoicec,DEV=0 -f S32_LE -c 4 -r 16000 -t raw /dev/null
+Restart=always
+RestartSec=2
+Nice=-5
+
+[Install]
+WantedBy=multi-user.target

@@ -7,3 +7,12 @@ backup/
 __pycache__/
 *.pyc
 robinson.env
+# kernel module build products (deploy/respeaker-4mic)
+*.ko
+*.o
+*.mod
+*.mod.c
+.*.cmd
+Module.symvers
+modules.order
+*.dtbo

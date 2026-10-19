@@ -1,6 +1,6 @@
 [Unit]
 Description=Robinson offline voice robot
-After=sound.target network.target
+After=sound.target network.target seeed-codec-heartbeat.service
 Wants=sound.target
 
 [Service]
