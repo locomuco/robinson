@@ -164,7 +164,7 @@ class Robinson:
             return LocalLlm(path, prompt, cfg.llm_threads, cfg.llm_max_tokens, cfg.llm_cache_dir,
                             tools=make_tools(self.memory, self.eye_cal, self._status,
                                              self.settings, cfg.state_file,
-                                             cfg.maintenance, bool(cfg.maint_pin))
+                                             cfg.maintenance, False)
                             if cfg.tools else None,
                             on_tool=self._on_tool, model_key=key)
 
@@ -437,12 +437,9 @@ class Robinson:
             if time.monotonic() > p["until"]:
                 self.say("Die Frage ist abgelaufen, ich habe nichts gemacht.")
             elif answer == "yes":
-                if p["pin"] and not self._pin_ok(text):
-                    self.say("Die PIN stimmt nicht. Ich mache nichts.")
-                else:
-                    log.info("confirmed: %s", p["desc"])
-                    self.say(p["ok"])
-                    p["action"]()
+                log.info("confirmed: %s", p["desc"])
+                self.say(p["ok"])
+                p["action"]()
                 return True
             elif answer == "no":
                 self.say("Okay, abgebrochen.")
@@ -470,15 +467,11 @@ class Robinson:
             return True
         return False
 
-    def _pin_ok(self, text: str) -> bool:
-        from .control import spoken_digits
-        return self.cfg.maint_pin in spoken_digits(text)
-
     def _confirm_words(self) -> str:
-        return "Ja und deine PIN" if self.cfg.maint_pin else "Ja"
+        return "Ja"
 
-    def _set_pending(self, desc: str, action, ok: str, pin: bool = False) -> None:
-        self._pending = {"desc": desc, "action": action, "ok": ok, "pin": pin,
+    def _set_pending(self, desc: str, action, ok: str) -> None:
+        self._pending = {"desc": desc, "action": action, "ok": ok,
                          "until": time.monotonic() + 90}
         log.info("waiting for confirmation: %s", desc)
 
@@ -493,14 +486,12 @@ class Robinson:
             return False
         self._set_pending(f"Wartung: {task}", lambda: self.maint.start(task),
                           "Alles klar, ich gebe den Auftrag an Claude Code. Das dauert ein paar "
-                          "Minuten, ich sage Bescheid, wenn ich fertig bin.",
-                          pin=bool(self.cfg.maint_pin))
+                          "Minuten, ich sage Bescheid, wenn ich fertig bin.")
         return True
 
     def _request_maint_undo(self) -> None:
         self._set_pending("Wartung rückgängig", self.maint.rollback,
-                          "Okay, ich nehme den letzten Wartungsauftrag zurück.",
-                          pin=bool(self.cfg.maint_pin))
+                          "Okay, ich nehme den letzten Wartungsauftrag zurück.")
 
     def _maint_done(self, summary: str, code_changed: bool) -> None:
         self._announcements.put((summary, code_changed))
