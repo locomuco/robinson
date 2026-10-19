@@ -111,6 +111,7 @@ class AudioIO:
                 log.warning("echo cancellation unavailable: %s", e)
         self.streams: list = []
         self.array = None                         # MicArray when recording from the 4-mic board
+        self._mic_dev = None                      # split mode: PortAudio index of the mic array
         self._null_out = False
         mic = _try_device(mic_device, True, False) if mic_device else None
         if mic is None:
@@ -127,9 +128,8 @@ class AudioIO:
             if mic_channels == 4:
                 from .mic_array import MicArray
                 self.array = MicArray(beamform)
-            self.streams.append(sd.InputStream(
-                device=mic, samplerate=SR, blocksize=SR // 50, channels=mic_channels,
-                dtype="int32", callback=self._in_callback, latency="high"))
+            self._mic_dev = mic
+            self.streams.append(self._open_mic())
             out = _try_device(device, False, True)
             if out is None:
                 log.warning("no speaker matching %r - playing into the void", device)
@@ -141,10 +141,33 @@ class AudioIO:
                     dtype="float32", callback=self._out_callback, latency="high"))
         self._dec_mic, self._dec_ref = _Decimator(rate // SR), _Decimator(rate // SR)
         self._raw_peak = 0.0
+        self._last_mic = time.monotonic()
         self._stop = threading.Event()
         self._worker = threading.Thread(target=self._process, name="audio", daemon=True)
 
+    def _open_mic(self):
+        return sd.InputStream(
+            device=self._mic_dev, samplerate=SR, blocksize=SR // 50, channels=self.mic_channels,
+            dtype="int32", callback=self._in_callback, latency="high")
+
+    def _revive_mic(self) -> None:
+        """The mic stream went silent (PortAudio gives up after a failed xrun
+        recovery, e.g. while the codec clocks restart): reopen it."""
+        log.warning("no mic audio for %.0f s - reopening the mic stream",
+                    time.monotonic() - self._last_mic)
+        self._last_mic = time.monotonic()           # next attempt in a few seconds
+        try:
+            self.streams[0].close()
+        except Exception:  # noqa: BLE001
+            pass
+        try:
+            self.streams[0] = self._open_mic()
+            self.streams[0].start()
+        except Exception as e:  # noqa: BLE001
+            log.warning("mic stream not reopened yet: %s", e)
+
     def start(self) -> None:
+        self._last_mic = time.monotonic()
         self._worker.start()
         for st in self.streams:
             st.start()
@@ -207,6 +230,7 @@ class AudioIO:
     def _in_callback(self, indata, frames, _time, status):
         if status:
             log.debug("mic status: %s", status)
+        self._last_mic = time.monotonic()
         self._put(("mic", indata.copy()))
 
     def _out_callback(self, outdata, frames, _time, status):
@@ -238,6 +262,10 @@ class AudioIO:
             try:
                 kind, *data = self._raw.get(timeout=0.5)
             except queue.Empty:
+                kind = None
+            if self._mic_dev is not None and time.monotonic() - self._last_mic > 3:
+                self._revive_mic()
+            if kind is None:
                 continue
             if kind == "ref":
                 ref_buf = np.concatenate([ref_buf, self._dec_ref(data[0])])[-SR // 4:]

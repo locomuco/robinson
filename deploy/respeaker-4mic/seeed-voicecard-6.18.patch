@@ -21,7 +21,7 @@ index b5b2039..daad6fe 100644
  		reg_val |= (0x1<<AIF1_MSTR_MOD);
  		break;
 diff --git a/ac108.c b/ac108.c
-index bcf12e2..07b632a 100644
+index bcf12e2..107be25 100644
 --- a/ac108.c
 +++ b/ac108.c
 @@ -281,7 +281,7 @@ static int snd_ac108_put_volsw(struct snd_kcontrol *kcontrol,
@@ -51,6 +51,15 @@ index bcf12e2..07b632a 100644
  		dev_dbg(dai->dev, "AC108 set to work as Slave\n");
  		/**
  		 * 0x30:chip is slave mode, BCLK & LRCK input,enable SDO1_EN and 
+@@ -1023,7 +1023,7 @@ static int ac108_set_clock(int y_start_n_stop, struct snd_pcm_substream *substre
+ 	if (y_start_n_stop && ac10x->i2c101 && _MASTER_MULTI_CODEC == _MASTER_AC101) {
+ 		ac101_trigger(substream, cmd, dai);
+ 	}
+-	if (y_start_n_stop && ac10x->sysclk_en == 0) {
++	if (y_start_n_stop) {	/* always: a failed STOP can leave sysclk_en set with the clocks off */
+ 		/* enable lrck clock */
+ 		ac10x_read(I2S_CTRL, &reg, ac10x->i2cmap[_MASTER_INDEX]);
+ 		if (reg & (0x01 << BCLK_IOEN)) {
 diff --git a/seeed-voicecard.c b/seeed-voicecard.c
 index 07359db..ff4b494 100644
 --- a/seeed-voicecard.c
