@@ -52,7 +52,7 @@ _USER_ACTIONS = [
 ]
 _FIRST_CUT = re.compile(r"(?<=[,;:])\s+")
 # the wake word as the STT tends to spell it
-_WAKE = re.compile(r"\W*\b(robb?ins[oe]h?n|robison|robin son)\b\W*", re.I)
+_WAKE = re.compile(r"\W*\b(robb?ins[oe]h?n|robison|robin'?s?\s?s?[oe]h?n)\b\W*", re.I)
 
 
 class Robinson:
@@ -91,6 +91,13 @@ class Robinson:
             if self.audio.array:
                 self.audio.array.on_doa = self._on_doa
             self.vad = self._make_vad()
+            self.kws = None
+            if cfg.wake_word and os.path.isdir(cfg.path(cfg.kws_model)):
+                try:
+                    from .wake import WakeWord
+                    self.kws = WakeWord(cfg.path(cfg.kws_model), cfg.kws_threshold)
+                except Exception as e:  # noqa: BLE001
+                    log.warning("wake word spotter unavailable: %s", e)
         self.tts = Tts(cfg.path(cfg.tts_voice), self.audio.rate if self.audio else 48_000,
                        cfg.tts_length_scale, cfg.tts_noise_scale, cfg.tts_noise_w_scale,
                        cfg.tts_robot, cfg.tts_pitch, cfg.tts_tone,
@@ -112,6 +119,7 @@ class Robinson:
         self._turn_user_actions: set[str] = set()
         self._turn_tools: list[str] = []
         self.awake_until = 0.0                # follow-up window: no wake word needed
+        self.wake_t = 0.0                     # when the keyword spotter last heard "Robinson"
         self.leds = None
         if use_audio and cfg.leds:
             from .leds import Leds
@@ -257,6 +265,10 @@ class Robinson:
             speaking = self.vad.is_speech_detected()
             if self.audio.array:                # locate voices, but not our own
                 self.audio.array.active = speaking and not self.audio.playing
+            if self.kws is not None and self.kws(frame) and not self.audio.playing:
+                log.info("wake word heard")
+                self.wake_t = time.monotonic()
+                self.awake_until = max(self.awake_until, self.wake_t + 8)
 
             if log.isEnabledFor(logging.DEBUG):
                 meter_peak = max(meter_peak, float(np.sqrt(np.mean(frame ** 2))))
@@ -330,7 +342,8 @@ class Robinson:
                 self.busy.clear()
                 self.eyes.set_state("idle")
                 continue
-            if _WAKE.fullmatch(text.strip()):     # just "Robinson?"
+            if _WAKE.fullmatch(text.strip()) or (   # just "Robinson?"
+                    len(text.split()) <= 2 and time.monotonic() - self.wake_t < len(seg) / 16e3 + 3):
                 self.say("Yes?" if self.lang == "en" else "Ja?")
                 self._end_turn()
                 continue

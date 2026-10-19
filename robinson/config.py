@@ -80,6 +80,8 @@ class Config:
     fillers: bool = True                # "Hmm." while the LLM thinks
     wake_word: bool = True              # only answer when called "Robinson" …
     wake_followup_s: float = 20.0       # … or within this long after its last answer
+    kws_model: str = "sherpa-onnx-kws-zipformer-gigaspeech-3.3M-2024-01-01"   # in models_dir
+    kws_threshold: float = 0.2          # lower = triggers more easily
     boot_greeting: bool = True          # say hello at startup (also warms up the LLM)
 
     # ── audio ────────────────────────────────────────────────────────────────
