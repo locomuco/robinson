@@ -342,8 +342,10 @@ class Robinson:
                 self.eyes.set_state("idle")
                 continue
             from .wake import only_wake_word
-            if only_wake_word(text) or (            # just "Robinson?"
-                    len(text.split()) <= 2 and time.monotonic() - self.wake_t < len(seg) / 16e3 + 3):
+            # the spotter fired during this utterance (it ends ~0.5 s before STT is done)
+            spotted = time.monotonic() - self.wake_t < len(seg) / 16e3 + 1.5
+            self.wake_t = 0.0
+            if only_wake_word(text) or (spotted and len(text.split()) <= 2):   # just "Robinson?"
                 self.say("Yes?" if self.lang == "en" else "Ja?")
                 self._end_turn()
                 continue
