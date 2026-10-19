@@ -183,6 +183,14 @@ class ClaudeCodeLlm(Llm):
                             self._tool_ran = True
                             if self.on_tool:
                                 self.on_tool(name, block.get("input", {}))
+                elif kind == "user":
+                    content = ev.get("message", {}).get("content", [])
+                    for block in content if isinstance(content, list) else []:
+                        if block.get("type") == "tool_result":
+                            out = block.get("content")
+                            if isinstance(out, list):
+                                out = " ".join(b.get("text", "") for b in out if isinstance(b, dict))
+                            log.info("tool result → %s", out)
                 elif kind == "result":
                     if ev.get("is_error"):
                         raise OnlineUnavailable(f"claude: {ev.get('result')}")
