@@ -50,6 +50,27 @@ Debug without talking: `uv run robinson --text` (type, Robinson speaks) or
   eyes closed after 5 min of silence.
 - Talking over Robinson interrupts it (barge-in); echo cancellation keeps its
   own voice from triggering that.
+- **Wake word:** it only answers when called "Robinson" (keyword spotter +
+  fuzzy match in the transcript), within 20 s after its last answer, or while
+  it waits for a "Ja". Other speech in the room is transcribed locally and
+  dropped. "Robinson, schalte das Aktivierungswort aus" turns that off.
+- **Voice:** a natural ElevenLabs voice while online (set
+  `ELEVENLABS_API_KEY` in `robinson.env`; voice/model in `config.py`), piper
+  otherwise or when the cloud fails. Short phrases are cached in
+  `~/robinson-data/tts-cache`. "Robinson, schalte die natürliche Stimme aus"
+  switches to piper.
+
+## ReSpeaker 4-Mic Array (optional)
+
+With the ReSpeaker 4-Mic Array HAT, Robinson records from its four mics
+(USB adapter = speaker only), steers a delay-and-sum beam at the voice,
+turns its eyes towards whoever speaks and shows on the 12-LED ring where it
+hears speech (white: not addressed, blue: listening, purple: thinking, cyan:
+speaking). RP1's I2S on the Pi 5 has no TDM, so the board's audio is read by
+an RP1 PIO state machine: run `deploy/respeaker-4mic/install.sh` once and
+after every kernel upgrade, then reboot. Room orientation of mics and LEDs:
+`mic_front_deg`, `mic_mirror`, `led0_deg`, `led_mirror` (settings.json or
+`ROBINSON_*`).
 
 ## Local or online brain
 
