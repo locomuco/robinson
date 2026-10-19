@@ -27,6 +27,7 @@ SPEC = {
     "fillers":           ("bool", True, None, None, None),
     "barge_in":          ("bool", True, None, None, None),
     "boot_greeting":     ("bool", True, None, None, None),
+    "wake_word":         ("bool", True, None, None, None),
     "vad_min_silence_s": ("float", 0.45, 0.1, 0.25, 1.2),
 }
 SETTINGS_TOOL_NAMES = {"stimme_einstellen", "lautstaerke_einstellen", "mikrofon_einstellen",
@@ -236,15 +237,17 @@ def make_settings_tools(settings: Settings, state_file: str | None = None) -> li
         """Ändert dein Gesprächsverhalten.
 
         Args:
-          eigenschaft: "fuellwoerter" (Hmm beim Nachdenken), "unterbrechen" (darf man dich unterbrechen), "pause" (wie lange du wartest, bis der Mensch fertig ist) oder "begruessung" (Begrüßung beim Start).
+          eigenschaft: "fuellwoerter" (Hmm beim Nachdenken), "unterbrechen" (darf man dich unterbrechen), "pause" (wie lange du wartest, bis der Mensch fertig ist), "begruessung" (Begrüßung beim Start) oder "aktivierungswort" (antwortest du nur, wenn man dich mit "Robinson" anspricht).
           wert: "an"/"aus", bei pause "länger"/"kürzer".
         """
         e, w = eigenschaft.lower(), wert.lower()
         key = {"fuell": "fillers", "füll": "fillers", "unterb": "barge_in",
-               "pause": "vad_min_silence_s", "begr": "boot_greeting"}
+               "pause": "vad_min_silence_s", "begr": "boot_greeting", "aktiv": "wake_word",
+               "weck": "wake_word"}
         k = next((v for p, v in key.items() if e.startswith(p)), None)
         if k is None:
-            return "Eigenschaft muss fuellwoerter, unterbrechen, pause oder begruessung sein."
+            return ("Eigenschaft muss fuellwoerter, unterbrechen, pause, begruessung oder "
+                    "aktivierungswort sein.")
         up = _up(w)
         if up is None:
             return "Wert muss an/aus bzw. länger/kürzer sein."

@@ -44,8 +44,10 @@ cpp -nostdinc -I "$HDR/include" -I "$HDR_COMMON/include" -undef -x assembler-wit
     seeed-4mic-pi5-overlay.dts | dtc -@ -q -H epapr -O dtb -o seeed-4mic-pi5.dtbo -
 fdtoverlay -i /boot/firmware/bcm2712-rpi-5-b.dtb -o /dev/null seeed-4mic-pi5.dtbo
 sudo install -m 644 seeed-4mic-pi5.dtbo /boot/firmware/overlays/
-grep -qxF dtoverlay=seeed-4mic-pi5 /boot/firmware/config.txt \
-    || echo dtoverlay=seeed-4mic-pi5 | sudo tee -a /boot/firmware/config.txt >/dev/null
+for line in dtparam=spi=on dtoverlay=seeed-4mic-pi5; do    # SPI: the LED ring
+    grep -qxF $line /boot/firmware/config.txt \
+        || echo $line | sudo tee -a /boot/firmware/config.txt >/dev/null
+done
 sudo install -m 644 seeed-codec-heartbeat.service /etc/systemd/system/
 sudo systemctl daemon-reload
 sudo systemctl enable -q seeed-codec-heartbeat

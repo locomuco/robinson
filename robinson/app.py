@@ -1,8 +1,10 @@
 """Robinson main loop.
 
     mic ─► AEC ─► Silero VAD ─► utterance ─► STT ─► Gemma (stream) ─► sentences ─► piper ─► speaker
-                     │                                   │ tags
-                     └── speech while replying = barge-in └──► eyes (mood / actions)
+     │               │                   │ "Robinson"?      │ tags
+     │               │                   └ else ignored     └──► eyes (mood / actions)
+     │               └── speech while replying = barge-in
+     └ 4-mic array: beamforming + direction of the voice ──► eyes look, LED ring
 
 Threads: audio callback + audio worker (audio.py), eyes (eyes.py), the
 listener (this module, runs VAD and barge-in) and the responder (STT → LLM →
@@ -49,6 +51,8 @@ _USER_ACTIONS = [
     (re.compile(r"\baugen (auf|öffnen)|\bmach\w* (die|deine) augen auf"), "augen auf"),
 ]
 _FIRST_CUT = re.compile(r"(?<=[,;:])\s+")
+# the wake word as the STT tends to spell it
+_WAKE = re.compile(r"\W*\b(robb?ins[oe]h?n|robison|robin son)\b\W*", re.I)
 
 
 class Robinson:
@@ -83,7 +87,9 @@ class Robinson:
                     log.warning("speaker id unavailable: %s", e)
             self.audio = AudioIO(cfg.audio_device, cfg.audio_rate, cfg.aec,
                                  cfg.aec_delay_ms, cfg.output_gain, cfg.mic_device,
-                                 cfg.mic_channels)
+                                 cfg.mic_channels, cfg.beamform)
+            if self.audio.array:
+                self.audio.array.on_doa = self._on_doa
             self.vad = self._make_vad()
         self.tts = Tts(cfg.path(cfg.tts_voice), self.audio.rate if self.audio else 48_000,
                        cfg.tts_length_scale, cfg.tts_noise_scale, cfg.tts_noise_w_scale,
@@ -105,6 +111,12 @@ class Robinson:
         self.lang = "de"                     # language of the last human utterance
         self._turn_user_actions: set[str] = set()
         self._turn_tools: list[str] = []
+        self.awake_until = 0.0                # follow-up window: no wake word needed
+        self.leds = None
+        if use_audio and cfg.leds:
+            from .leds import Leds
+            self.leds = Leds(lambda: (self.eyes.state, self.awake), cfg.led0_deg,
+                             cfg.led_mirror, cfg.led_brightness)
         self.utterances: queue.Queue = queue.Queue()
         self.busy = threading.Event()        # a reply is being produced/played
         self.cancel = threading.Event()      # barge-in: abandon current reply
@@ -144,6 +156,25 @@ class Robinson:
         return LlmRouter(make_local, make_online if online_ready else None, cfg.llm,
                          cfg.state_file, cfg.local_model, cfg.online_model)
 
+    @property
+    def awake(self) -> bool:
+        """Listening without the wake word (follow-up window or waiting for "Ja")."""
+        return time.monotonic() < self.awake_until or self._pending is not None
+
+    def _addressed(self, text: str) -> bool:
+        if not self.cfg.wake_word or self.text_mode or self.awake:
+            return True
+        return bool(_WAKE.search(text))
+
+    def _on_doa(self, az_array: float, strength: float) -> None:
+        """Mic array located a voice (audio worker thread)."""
+        from .mic_array import to_room
+        room = to_room(az_array, self.cfg.mic_front_deg, self.cfg.mic_mirror)
+        log.debug("voice from %.0f° (array %.0f°, strength %.2f)", room, az_array, strength)
+        if self.leds:
+            self.leds.direction(az_array, strength)
+        self.eyes.look_at(room)
+
     def _status(self) -> str:
         return self.llm.status if hasattr(self, "llm") else ""
 
@@ -156,7 +187,7 @@ class Robinson:
         s, cfg = self.settings, self.cfg
         s.reload()
         old_silence = cfg.vad_min_silence_s
-        for k in ("fillers", "barge_in", "boot_greeting", "vad_min_silence_s", "tts_pitch",
+        for k in ("fillers", "barge_in", "boot_greeting", "wake_word", "vad_min_silence_s", "tts_pitch",
                   "tts_tone", "tts_robot", "tts_length_scale"):
             setattr(cfg, k, s.get(k, getattr(cfg, k)))
         self.tts.configure(robot=cfg.tts_robot, pitch=cfg.tts_pitch, tone=cfg.tts_tone,
@@ -224,6 +255,8 @@ class Robinson:
                 self.vad = self._make_vad()
             self.vad.accept_waveform(frame)
             speaking = self.vad.is_speech_detected()
+            if self.audio.array:                # locate voices, but not our own
+                self.audio.array.active = speaking and not self.audio.playing
 
             if log.isEnabledFor(logging.DEBUG):
                 meter_peak = max(meter_peak, float(np.sqrt(np.mean(frame ** 2))))
@@ -292,12 +325,20 @@ class Robinson:
                 self.busy.clear()
                 self.eyes.set_state("idle")
                 continue
+            if not self._addressed(text):
+                log.info("not addressed (no wake word), ignored")
+                self.busy.clear()
+                self.eyes.set_state("idle")
+                continue
+            if _WAKE.fullmatch(text.strip()):     # just "Robinson?"
+                self.say("Yes?" if self.lang == "en" else "Ja?")
+                self._end_turn()
+                continue
             self.speaker = None
             if self.audio and getattr(self, "speakers", None):
                 if (who := self._enroll_voice(text, seg)) is not None:
                     self.say(who)
-                    self.busy.clear()
-                    self.eyes.set_state("idle")
+                    self._end_turn()
                     continue
                 try:
                     self.speaker = self.speakers.identify(seg)
@@ -306,15 +347,18 @@ class Robinson:
                 if self.speaker:
                     log.info("speaker: %s", self.speaker)
             if self._handle_direct(text):
-                self.busy.clear()
-                self.eyes.set_state("idle")
+                self._end_turn()
                 continue
             self._play_filler(text)
             self._update_memory(text)
             self.reply(text, t0)
-            self.busy.clear()
-            if not self.cancel.is_set():
-                self.eyes.set_state("idle")
+            self._end_turn()
+
+    def _end_turn(self) -> None:
+        self.awake_until = time.monotonic() + self.cfg.wake_followup_s
+        self.busy.clear()
+        if not self.cancel.is_set():
+            self.eyes.set_state("idle")
 
     def _enroll_voice(self, text: str, seg: np.ndarray) -> str | None:
         """Answer to a "remember my voice" request, or None if it is none."""
@@ -535,6 +579,8 @@ class Robinson:
     # ── lifecycle ────────────────────────────────────────────────────────────
     def run(self) -> None:
         self.eyes.start()
+        if self.leds:
+            self.leds.start()
         self.audio.start()
         if self.cfg.boot_greeting:
             # also prefills the system prompt, so the first real answer is fast
@@ -567,6 +613,8 @@ class Robinson:
         if hasattr(self.llm, "close"):
             self.llm.close()
         self.eyes.stop()
+        if self.leds:
+            self.leds.stop()
         if self.audio:
             self.audio.close()
 

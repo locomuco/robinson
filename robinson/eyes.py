@@ -117,6 +117,8 @@ class Eyes(threading.Thread):
         self._sleep_now = False            # "schlaf ein": sleep until spoken to
         self._expr_until = 0.0             # temporary lid expression (große Augen …)
         self._expr_openness = 1.0
+        self._look: float | None = None    # room azimuth of a voice (+ = left), see look_at
+        self._look_t = 0.0
 
     # ── public API (thread-safe, non-blocking) ───────────────────────────────
     def set_state(self, state: str) -> None:
@@ -124,6 +126,15 @@ class Eyes(threading.Thread):
             if state != "idle":
                 self._last_activity = time.monotonic()
             self._state = state
+
+    @property
+    def state(self) -> str:
+        return self._state
+
+    def look_at(self, azimuth: float) -> None:
+        """Turn the eyes towards a voice: azimuth in degrees, 0 = ahead, + = left."""
+        with self._lock:
+            self._look, self._look_t = azimuth, time.monotonic()
 
     def set_mood(self, mood: str) -> None:
         if mood in MOODS:
@@ -250,7 +261,17 @@ class Eyes(threading.Thread):
             elif state == "thinking":
                 wander *= 0.5
 
-            if now >= next_saccade and now >= self._hold_gaze_until:
+            look = self._look if now - self._look_t < 2.5 else None
+            if look is not None and state in ("idle", "listening") \
+                    and now >= self._hold_gaze_until:
+                # someone is talking: look their way (sides beyond ±90° = full turn)
+                g = self.cal.gaze("lr")
+                edge = g["links"] if look > 0 else g["rechts"]
+                lr = lr_c + (edge - lr_c) * min(1.0, abs(look) / 90) * 0.9
+                if abs(self._pos.get(LR, lr_c) - lr) > 3:
+                    self._gaze(lr, ud_c)
+                next_saccade = now + random.uniform(1.0, 2.5)
+            elif now >= next_saccade and now >= self._hold_gaze_until:
                 if state == "thinking":
                     # classic "searching memory" glance: up and to one side
                     lr = random.choice((lr_c - 35, lr_c + 35))

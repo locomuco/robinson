@@ -78,6 +78,8 @@ class Config:
     settings_file: str = os.path.join(HOME, "robinson-data", "settings.json")  # voice-changed
 
     fillers: bool = True                # "Hmm." while the LLM thinks
+    wake_word: bool = True              # only answer when called "Robinson" …
+    wake_followup_s: float = 20.0       # … or within this long after its last answer
     boot_greeting: bool = True          # say hello at startup (also warms up the LLM)
 
     # ── audio ────────────────────────────────────────────────────────────────
@@ -86,6 +88,13 @@ class Config:
     mic_device: str = "seeed4micpio"    # separate mic card (ReSpeaker 4-Mic via RP1 PIO,
                                         # deploy/respeaker-4mic); "" or missing = audio_device
     mic_channels: int = 4
+    beamform: bool = True               # steer the 4 mics at whoever speaks (mic_array.py)
+    mic_front_deg: float = 0.0          # array azimuth (deg) that is straight ahead of Robinson
+    mic_mirror: bool = False            # array azimuth runs clockwise as seen from above
+    leds: bool = True                   # ReSpeaker LED ring (leds.py)
+    led0_deg: float = 0.0               # array azimuth of LED 0
+    led_mirror: bool = False            # LEDs are numbered against the array azimuth
+    led_brightness: float = 0.3
     aec: bool = True                    # WebRTC echo cancellation (if available)
     aec_delay_ms: int = 60              # speaker→mic latency hint for AEC
     output_gain: float = 1.0

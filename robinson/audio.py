@@ -6,7 +6,8 @@ played at that moment — the reference WebRTC AEC needs to subtract Robinson's
 own voice from the mic.
 
 Split mode (mic_device found, e.g. the ReSpeaker 4-Mic on the PIO card): the
-mic array records 16 kHz multichannel on its own stream and is mixed to mono;
+mic array records 16 kHz multichannel on its own stream and is beamformed to
+mono (mic_array.py, which also estimates where speech comes from);
 the speaker plays on the USB adapter, or nowhere if it is missing. Mic and
 reference are paired by arrival; WebRTC's delay estimation covers the rest.
 The callbacks only move buffers; decimation, AEC and VAD run in a worker.
@@ -90,7 +91,7 @@ def _try_device(name: str, need_in: bool, need_out: bool) -> int | None:
 class AudioIO:
     def __init__(self, device: str, rate: int = 48_000, aec: bool = True,
                  aec_delay_ms: int = 60, gain: float = 1.0, mic_device: str = "",
-                 mic_channels: int = 4):
+                 mic_channels: int = 4, beamform: bool = True):
         self.rate = rate
         self.block = rate // 50                   # 20 ms device blocks
         self.gain = gain
@@ -109,6 +110,7 @@ class AudioIO:
             except Exception as e:
                 log.warning("echo cancellation unavailable: %s", e)
         self.streams: list = []
+        self.array = None                         # MicArray when recording from the 4-mic board
         self._null_out = False
         mic = _try_device(mic_device, True, False) if mic_device else None
         if mic is None:
@@ -122,6 +124,9 @@ class AudioIO:
                 latency="high"))         # survive LLM prefill bursts on all cores
         else:
             self.mic_channels = mic_channels
+            if mic_channels == 4:
+                from .mic_array import MicArray
+                self.array = MicArray(beamform)
             self.streams.append(sd.InputStream(
                 device=mic, samplerate=SR, blocksize=SR // 50, channels=mic_channels,
                 dtype="int32", callback=self._in_callback, latency="high"))
@@ -242,7 +247,8 @@ class AudioIO:
                 ref_buf = np.concatenate([ref_buf, self._dec_ref(data[1])])
                 mic_buf = np.concatenate([mic_buf, self._dec_mic(mic)])
             else:                                 # array frames: int32 → mono float
-                mic = data[0].mean(axis=1, dtype=np.float64).astype(np.float32) / 2**31
+                x = data[0].astype(np.float32) / 2**31
+                mic = self.array.process(x) if self.array else x.mean(axis=1)
                 mic_buf = np.concatenate([mic_buf, mic])
             self._raw_peak = max(self._raw_peak, float(np.sqrt(np.mean(mic ** 2))))
             while len(mic_buf) >= FRAME:
