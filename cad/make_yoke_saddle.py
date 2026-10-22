@@ -12,8 +12,12 @@ Trapezoid in cross-section (wide foot, sloped sides). The yoke lies in a half sh
 (inner Ø 43, i.e. 0.5 mm clearance; add felt tape if it rattles) up to its centre line,
 so the tube lifts straight out. A Velcro strap (up to 20 mm) goes over the yoke, into
 the upper window in each sloped side, down the channel behind the bar, out of the lower
-window and back up over the bar - it never gets between saddle and plate. Print in
-PETG or ASA (the yoke gets warm), flat side down, no supports.
+window and back up over the bar - it never gets between saddle and plate. Or a rubber
+band / O-ring over the yoke between the hex-head pegs on both sides.
+
+Steampunk dress: rivet rows along the sloped sides, a gear on both end faces, hex bolt
+heads as band hooks. Print in PETG or ASA (the yoke gets warm; copper or brass coloured
+matches the yoke), flat side down; the peg heads overhang a little, supports optional.
 """
 
 import math
@@ -29,12 +33,16 @@ TILT = float(sys.argv[2]) if len(sys.argv) > 2 else 0.0
 YOKE_D, CLEAR = 42.0, 0.5
 R = (YOKE_D + 2 * CLEAR) / 2               # inner radius of the shell
 WALL = 4.0                                 # at the top of the sides
-LEN = 34.0                                 # along the neck (room for a 20 mm strap)
+LEN = 40.0                                 # along the neck: 20 mm strap + band pegs beside it
 FOOT_W = 80.0                              # width at the plate
 STRAP_W, STRAP_T = 22.0, 4.0               # channel for a Velcro strap up to 20 mm wide
 BAR = 4.0                                  # skin in front of the channel = bar the strap wraps
 WIN = 4.5                                  # window height
 CH_Z0, CH_Z1 = 6.0, 26.0                   # channel from/to height above the plate
+PEG_Z, PEG_Y = 32.0, 14.5                  # rubber band pegs: height on the slope, ±y
+PEG_R, PEG_L, HEAD_R, HEAD_T = 2.3, 4.5, 4.3, 2.4
+RIVET_R, RIVET_Y = 1.4, LEN / 2 - 2.6      # rivet rows along both edges of each slope
+GEAR_Z, GEAR_TEETH, GEAR_RO, GEAR_RI, GEAR_H = 9.0, 10, 7.5, 5.8, 0.8
 
 OUT = os.path.join(os.path.dirname(os.path.abspath(__file__)), "yoke-saddle.stl")
 
@@ -81,6 +89,48 @@ for sx in (-1, 1):
     win_hi = Polygon([inset(CH_Z1 - WIN, -2), inset(CH_Z1, -2), inset(CH_Z1, BAR + 0.5), inset(CH_Z1 - WIN, BAR + 0.5)])
     for p in (channel, win_lo, win_hi):
         shape = shape.difference(prism(mirror(p), STRAP_W), engine="manifold")
+
+
+
+def along(p, v, length):
+    """Transform placing a z-axis primitive from point p along unit vector v (x/z plane)."""
+    ang = math.atan2(v[0], v[2])                                   # rotate +z towards v
+    return (trimesh.transformations.translation_matrix(p) @
+            trimesh.transformations.rotation_matrix(ang, (0, 1, 0)) @
+            trimesh.transformations.translation_matrix((0, 0, length / 2)))
+
+
+adds = []
+for sx in (-1, 1):
+    n = (sx * nx, 0.0, nz)
+    fx = sx * face_x(PEG_Z)
+    for py in (-PEG_Y, PEG_Y):                                     # hex bolt band hooks
+        shaft = trimesh.creation.cylinder(radius=PEG_R, height=PEG_L + 1, sections=32)
+        shaft.apply_transform(along((fx - n[0], py, PEG_Z - n[2]), n, PEG_L + 1))
+        head = trimesh.creation.cylinder(radius=HEAD_R, height=HEAD_T, sections=6)
+        head.apply_transform(along((fx + n[0] * PEG_L, py, PEG_Z + n[2] * PEG_L), n, HEAD_T))
+        adds += [shaft, head]
+    for ry in (-RIVET_Y, RIVET_Y):                                 # rivets, half sunk into the slope
+        for z in np.arange(4.0, axis_z - 2.5, 5.0):
+            if abs(z - PEG_Z) < 6 and abs(ry) > PEG_Y - HEAD_R - RIVET_R:
+                continue
+            rivet = trimesh.creation.icosphere(subdivisions=2, radius=RIVET_R)
+            rivet.apply_translation((sx * face_x(z), ry, z))
+            adds.append(rivet)
+
+# gear relief on both end faces, below the shell
+t = np.linspace(0, 2 * np.pi, GEAR_TEETH * 8, endpoint=False)
+rr = np.where((t * GEAR_TEETH / (2 * np.pi)) % 1 < 0.5, GEAR_RO, GEAR_RI)
+gear2d = Polygon(np.c_[rr * np.sin(t), GEAR_Z + rr * np.cos(t)]).difference(
+    Polygon([(1.8 * math.sin(a), GEAR_Z + 1.8 * math.cos(a)) for a in np.linspace(0, 2 * np.pi, 24, endpoint=False)]))
+for sy in (-1, 1):
+    g = trimesh.creation.extrude_polygon(gear2d, GEAR_H + 0.4)
+    g.apply_transform(np.array([[1, 0, 0, 0], [0, 0, sy, sy * (LEN / 2 - 0.4)], [0, 1, 0, 0], [0, 0, 0, 1]], float))
+    if g.volume < 0:
+        g.invert()
+    adds.append(g)
+
+shape = trimesh.boolean.union([shape] + adds, engine="manifold")
 
 # drop the sliver triangles the booleans leave, so the file reloads as one closed body
 shape.merge_vertices(digits_vertex=4)
