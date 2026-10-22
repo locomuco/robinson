@@ -8,9 +8,10 @@ Run:  uv run --with trimesh --with manifold3d --with scipy python cad/make_yoke_
               along the neck, so a few degrees off do not bind
 
 The yoke lies in a half shell (inner Ø 43, i.e. 0.5 mm clearance; add felt tape if
-it rattles) up to its centre line, so the tube lifts straight out. Two slots in the
-base take a Velcro strap over the yoke. Print in PETG or ASA (the yoke gets warm),
-flat side down, no supports.
+it rattles) up to its centre line, so the tube lifts straight out. A Velcro strap
+(up to 20 mm) goes over the yoke and through an eyelet on each side wall, around its
+bar - well above the foot, so the strap never gets between saddle and plate. Print in
+PETG or ASA (the yoke gets warm), flat side down, no supports.
 """
 
 import os
@@ -24,9 +25,11 @@ TILT = float(sys.argv[2]) if len(sys.argv) > 2 else 0.0
 YOKE_D, CLEAR = 42.0, 0.5
 R = (YOKE_D + 2 * CLEAR) / 2               # inner radius of the shell
 WALL = 4.0
-LEN = 14.0                                 # along the neck
-BASE_W, BASE_D, BASE_T = 80.0, 34.0, 3.0   # foot: across x along x height
-SLOT_W, SLOT_L = 4.0, 22.0                 # strap slots (Velcro up to 20 mm)
+LEN = 30.0                                 # along the neck (room for a 20 mm strap)
+BASE_W, BASE_D, BASE_T = 80.0, 40.0, 3.0   # foot: across x along x height
+SLOT_W, SLOT_L = 4.0, 22.0                 # strap eyelets (Velcro up to 20 mm)
+BAR = 4.0                                  # eyelet bar the strap wraps around
+EYE_Z0 = 10.0                              # eyelet underside above the plate: strap room under the bar
 
 OUT = os.path.join(os.path.dirname(os.path.abspath(__file__)), "yoke-saddle.stl")
 
@@ -42,10 +45,15 @@ tilt = trimesh.transformations.rotation_matrix(np.radians(TILT), (1, 0, 0))     
 bore.apply_transform(trimesh.transformations.translation_matrix((0, 0, axis_z)) @ tilt @ rot)
 shape = shape.difference(bore, engine="manifold")
 
-for sx in (-1, 1):                                                              # strap slots in the foot
-    slot = trimesh.creation.box((SLOT_W, SLOT_L, 20))
-    slot.apply_translation((sx * (R + WALL + 5.5), 0, 0))
-    shape = shape.difference(slot, engine="manifold")
+# eyelets on the outside of both side walls: a frame around a vertical slot, open below
+eye_h = min(axis_z - 4, 14.0)
+for sx in (-1, 1):
+    x_in = R + WALL                                                  # outer face of the wall
+    ring = trimesh.creation.box((SLOT_W + BAR, SLOT_L + 2 * BAR, eye_h))
+    ring.apply_translation((sx * (x_in + (SLOT_W + BAR) / 2), 0, EYE_Z0 + eye_h / 2))
+    hole = trimesh.creation.box((SLOT_W, SLOT_L, eye_h + 2))
+    hole.apply_translation((sx * (x_in + SLOT_W / 2), 0, EYE_Z0 + eye_h / 2))
+    shape = shape.union(ring, engine="manifold").difference(hole, engine="manifold")
 
 assert shape.is_watertight
 shape.export(OUT)
