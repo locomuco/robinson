@@ -60,6 +60,8 @@ PI_X, PI_Z = 55.0, 32.0
 holes += [circle(PI_X + hx, PI_Z + hz, 2.7) for hx in (3.5, 61.5) for hz in (3.5, 52.5)]
 USBC_X = PI_X + 11.2                           # USB-C centre, 11.2 mm from the SD-card end
 holes.append(stadium(USBC_X, 19.0, 18.0, 10.0))  # the USB-C plug passes through (cable from below)
+AUDIO = (149.5, 60.0, 10.0, 14.0)              # 3.5 mm plug of the USB audio adapter's cable
+holes.append(stadium(*AUDIO))
 
 # HW-170 / PCA9685 upright, back left; holes ~19 x 56 mm, slotted ±1.5 mm; the V+ screw
 # terminal sits in the middle of a long side - its cable passes through next to it
@@ -97,7 +99,10 @@ parts = {"EyeMech": None, "Pi 5": box(PI_X, PI_Z, PI_X + 85, PI_Z + 56),
 print("Pi 5 X %.1f-%.1f, HW-170 X %.1f-%.1f, gap %.1f mm" % (PI_X, PI_X + 85, PCA_X, PCA_X + PCA_W, PI_X - PCA_X - PCA_W))
 for name in ("Pi 5", "HW-170"):
     print("%s: nearest rod hole centre %.1f mm" % (name, min(parts[name].distance(Point(p)) for p in RODS)))
-for name, h in (("USB-C hole", stadium(USBC_X, 19.0, 18.0, 10.0)), ("PCA power hole", stadium(12.0, PCA_Z + PCA_H / 2, 8.0, 14.0))):
+for name, h in (("USB-C hole", stadium(USBC_X, 19.0, 18.0, 10.0)), ("PCA power hole", stadium(12.0, PCA_Z + PCA_H / 2, 8.0, 14.0)),
+                ("audio hole", stadium(*AUDIO))):
+    if name == "audio hole":
+        print("audio hole to the Pi board edge: %.1f mm" % stadium(*AUDIO).distance(parts["Pi 5"]))
     print("%s: bounds %s, to nearest rod hole centre %.1f mm, to plate edge %.1f mm"
           % (name, [round(v, 1) for v in h.bounds], min(h.distance(Point(p)) for p in RODS), h.distance(full.exterior)))
 
