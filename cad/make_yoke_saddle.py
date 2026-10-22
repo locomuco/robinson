@@ -1,12 +1,14 @@
 """Saddle for the CRT's deflection yoke: sits loose on the plate, no holes needed.
 
 Run:  uv run --with trimesh --with manifold3d --with shapely --with mapbox-earcut --with scipy \
-          python cad/make_yoke_saddle.py [gap_mm] [tilt_deg]
+          python cad/make_yoke_saddle.py [gap_mm] [tilt_deg] [length_mm]
 
     gap_mm    height from the plate up to the underside of the yoke (default 19:
               glass neck top at 50 mm, 20 mm neck, 42 mm yoke -> 50 - 10 - 21)
     tilt_deg  how much the neck rises towards the back (default 0); the cradle is short
-              along the neck, so a few degrees off do not bind
+              along the neck, so a few degrees off do not bind; turn the saddle around
+              to tilt the other way
+    length_mm along the neck (default 12); from 30 mm on there is room for a Velcro strap
 
 Trapezoid in cross-section (wide foot, sloped sides). The yoke lies in a half shell
 (inner Ø 43, i.e. 0.5 mm clearance; add felt tape if it rattles) up to its centre line,
@@ -28,26 +30,30 @@ import numpy as np
 import trimesh
 from shapely.geometry import Polygon
 
-GAP = float(sys.argv[1]) if len(sys.argv) > 1 else 19.0
-TILT = float(sys.argv[2]) if len(sys.argv) > 2 else 0.0
+GAP = float(sys.argv[1]) if len(sys.argv) > 1 else 15.0
+TILT = float(sys.argv[2]) if len(sys.argv) > 2 else 7.0
 YOKE_D, CLEAR = 42.0, 0.5
 R = (YOKE_D + 2 * CLEAR) / 2               # inner radius of the shell
 WALL = 4.0                                 # at the top of the sides
-LEN = 40.0                                 # along the neck: 20 mm strap + band pegs beside it
+LEN = float(sys.argv[3]) if len(sys.argv) > 3 else 12.0   # along the neck
+VELCRO = LEN >= 30                         # a 20 mm strap channel needs the length
 FOOT_W = 80.0                              # width at the plate
 STRAP_W, STRAP_T = 22.0, 4.0               # channel for a Velcro strap up to 20 mm wide
 BAR = 4.0                                  # skin in front of the channel = bar the strap wraps
 WIN = 4.5                                  # window height
 CH_Z0, CH_Z1 = 6.0, 26.0                   # channel from/to height above the plate
-PEG_Z, PEG_Y = 32.0, 14.5                  # rubber band pegs: height on the slope, ±y
+PEG_YS = (-14.5, 14.5) if VELCRO else (0.0,)   # rubber band pegs: beside the strap, or centred
 PEG_R, PEG_L, HEAD_R, HEAD_T = 2.3, 4.5, 4.3, 2.4
 RIVET_R, RIVET_Y = 1.4, LEN / 2 - 2.6      # rivet rows along both edges of each slope
-GEAR_Z, GEAR_TEETH, GEAR_RO, GEAR_RI, GEAR_H = 9.0, 10, 7.5, 5.8, 0.8
+GEAR_TEETH, GEAR_H = 10, 0.8
 
 OUT = os.path.join(os.path.dirname(os.path.abspath(__file__)), "yoke-saddle.stl")
 
 axis_z = GAP + R - CLEAR                   # yoke centre height (yoke rests on the shell bottom)
 top_x, foot_x = R + WALL, FOOT_W / 2
+PEG_Z = axis_z - 9.0                       # band pegs on the upper part of the slope
+GEAR_RO = min(7.5, (GAP - 3.0) / 2)        # gear below the shell (also where the tilt lowers it)
+GEAR_RI, GEAR_Z = GEAR_RO * 0.78, 1.0 + GEAR_RO
 
 # x = across the neck, y = along the neck, z = up; plate surface at z = 0
 dx, dz = top_x - foot_x, axis_z            # direction of the right sloped face, bottom -> top
@@ -81,7 +87,7 @@ tilt = trimesh.transformations.rotation_matrix(np.radians(TILT), (1, 0, 0))     
 bore.apply_transform(trimesh.transformations.translation_matrix((0, 0, axis_z)) @ tilt @ rot)
 shape = body.difference(bore, engine="manifold")
 
-for sx in (-1, 1):
+for sx in ((-1, 1) if VELCRO else ()):
     def mirror(p, sx=sx):
         return Polygon([(sx * x, z) for x, z in p.exterior.coords])
     channel = Polygon([inset(CH_Z0, BAR), inset(CH_Z1, BAR), inset(CH_Z1, BAR + STRAP_T), inset(CH_Z0, BAR + STRAP_T)])
@@ -104,7 +110,7 @@ adds = []
 for sx in (-1, 1):
     n = (sx * nx, 0.0, nz)
     fx = sx * face_x(PEG_Z)
-    for py in (-PEG_Y, PEG_Y):                                     # hex bolt band hooks
+    for py in PEG_YS:                                              # hex bolt band hooks
         shaft = trimesh.creation.cylinder(radius=PEG_R, height=PEG_L + 1, sections=32)
         shaft.apply_transform(along((fx - n[0], py, PEG_Z - n[2]), n, PEG_L + 1))
         head = trimesh.creation.cylinder(radius=HEAD_R, height=HEAD_T, sections=6)
@@ -112,7 +118,7 @@ for sx in (-1, 1):
         adds += [shaft, head]
     for ry in (-RIVET_Y, RIVET_Y):                                 # rivets, half sunk into the slope
         for z in np.arange(4.0, axis_z - 2.5, 5.0):
-            if abs(z - PEG_Z) < 6 and abs(ry) > PEG_Y - HEAD_R - RIVET_R:
+            if abs(z - PEG_Z) < HEAD_R + RIVET_R + 1 and any(abs(ry - py) < HEAD_R + RIVET_R for py in PEG_YS):
                 continue
             rivet = trimesh.creation.icosphere(subdivisions=2, radius=RIVET_R)
             rivet.apply_translation((sx * face_x(z), ry, z))
@@ -140,6 +146,8 @@ shape.export(OUT)
 check = trimesh.load(OUT)
 assert check.is_watertight and len(check.split()) == 1, "saddle mesh is not one closed body"
 cx, cz = inset(CH_Z1, BAR + STRAP_T)
+print("hold-down:", "Velcro strap or rubber band" if VELCRO else "rubber band (too short for a Velcro strap)")
 print(f"gap {GAP} mm, tilt {TILT}°: yoke centre at {axis_z:.1f} mm; {FOOT_W:.0f} x {LEN:.0f} mm foot, "
       f"{2 * top_x:.0f} mm wide at the top, {axis_z:.0f} mm high -> {os.path.basename(OUT)}")
-print(f"thinnest wall between strap channel and shell: {math.hypot(cx, cz - axis_z) - R:.1f} mm")
+if VELCRO:
+    print(f"thinnest wall between strap channel and shell: {math.hypot(cx, cz - axis_z) - R:.1f} mm")
