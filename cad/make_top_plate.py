@@ -15,14 +15,16 @@ from shapely.geometry import LineString, Point, Polygon, box
 
 HERE = os.path.dirname(os.path.abspath(__file__))
 SRC = os.path.join(HERE, "top-plate-original-side-notches.stl")
+CUTOUT_SRC = os.path.join(HERE, "plate-160x120-trapezoid-cutout.stl")   # its front cutout is reused
 OUT = os.path.join(HERE, "top-plate-eyes-pi5-pca9685.stl")
 
 src = trimesh.load(SRC)
 (X0, Y0, Z0), (X1, Y1, Z1) = src.bounds
 W, H, T = X1 - X0, Z1 - Z0, Y1 - Y0          # 160 x 210 x 4
 R = 7.0                                        # corner radius of the original
-RODS = [(10, 10), (25, 10), (135, 10), (150, 10), (10, 200), (25, 200), (135, 200), (150, 200),
-        (10, 100), (150, 100)]                 # M4 threaded rods, Ø 4.3
+# M4 threaded rods, Ø 4.3; the inner front pair (25/135, 200) is dropped: the front cutout runs
+# through it, as on the 160 x 120 plate the cutout comes from
+RODS = [(10, 10), (25, 10), (135, 10), (150, 10), (10, 200), (150, 200), (10, 100), (150, 100)]
 
 
 def circle(x, z, d):
@@ -33,9 +35,10 @@ def slot(x, z, d, length):                     # vertical stadium
     return LineString([(x, z - length / 2), (x, z + length / 2)]).buffer(d / 2, quad_segs=24)
 
 
-def original_outline() -> Polygon:
-    s = src.section(plane_origin=[0, (Y0 + Y1) / 2, 0], plane_normal=[0, 1, 0])
-    return max((Polygon(np.c_[e[:, 0] - X0, e[:, 2] - Z0]) for e in s.discrete), key=lambda p: p.area)
+def outline_of(mesh) -> Polygon:
+    (x0, y0, z0), (_, y1, _) = mesh.bounds
+    s = mesh.section(plane_origin=[0, (y0 + y1) / 2, 0], plane_normal=[0, 1, 0])
+    return max((Polygon(np.c_[e[:, 0] - x0, e[:, 2] - z0]) for e in s.discrete), key=lambda p: p.area)
 
 
 full = box(R, R, W - R, H - R).buffer(R, quad_segs=32)
@@ -55,13 +58,15 @@ PCA_X, PCA_Z, PCA_W, PCA_H = 112.0, 28.0, 25.4, 62.3
 holes += [slot(PCA_X + PCA_W / 2 + dx, PCA_Z + PCA_H / 2 + dz, 3.2, 3.0)
           for dx in (-9.5, 9.5) for dz in (-28.0, 28.0)]
 
-# the original 50 mm notch (left side of the original plate), turned to the front edge, centred
-notch = max((g for g in full.difference(original_outline()).geoms if g.bounds[0] < 1),
-            key=lambda g: g.area)
-notch = notch.union(box(-10, notch.bounds[1], 0.5, notch.bounds[3]))   # open past the edge
-notch = rotate(notch, -90, origin=(0, 0))                               # mouth faces +Z
+# front cutout: the trapezoid of the 160 x 120 plate (126 mm wide at the edge, 20 mm deep),
+# turned from its bottom edge to our front edge
+cut_src = trimesh.load(CUTOUT_SRC)
+cw, ch = cut_src.extents[0], cut_src.extents[2]
+cut_full = box(R, R, cw - R, ch - R).buffer(R, quad_segs=32)
+notch = max(cut_full.difference(outline_of(cut_src)).geoms, key=lambda g: g.area)
 nb = notch.bounds
-notch = translate(notch, W / 2 - (nb[0] + nb[2]) / 2, H + 10 - nb[3])
+notch = notch.union(box(nb[0], -10, nb[2], 0.5))                       # open past the edge
+notch = translate(rotate(notch, 180, origin=(cw / 2, 0)), W / 2 - cw / 2, H)
 
 plate = full
 for h in holes:
