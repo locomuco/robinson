@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 """Step-by-step servo check for a newly built eye mechanism (Robinson must run with eyes=sim).
 
-    eye_check.py center                 all channels 0-5 to 90° (EyeMech assembly pose), one by one
+    eye_check.py center [ch ...]        channels (default 0-5) to 90° (EyeMech assembly pose), one by one
     eye_check.py move <ch> <angle>      move one channel there slowly (1° steps) from its last angle
     eye_check.py release                stop the pulses: servos go limp
 
@@ -40,7 +40,7 @@ def main() -> None:
     state = load()
     if cmd == "center":
         k = kit()
-        for ch in range(6):
+        for ch in ([int(c) for c in sys.argv[2:]] or range(6)):
             print(f"channel {ch} -> 90°", flush=True)
             k.servo[ch].angle = 90
             state[str(ch)] = 90
