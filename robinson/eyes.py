@@ -333,10 +333,16 @@ class Eyes(threading.Thread):
         elif a == "augen rollen":
             # half circle over the top: right → up-right → up → up-left → left → centre
             r, l, up = g_lr["rechts"], g_lr["links"], g_ud["oben"]
-            for lr, ud in ((r, ud_c), ((r + lr_c) / 2, up - 10), (lr_c, up), ((l + lr_c) / 2, up - 10),
-                           (l, ud_c), (lr_c, ud_c)):
-                self._gaze(lr, ud)
-                time.sleep(0.15)
+            pts = [(r, ud_c), ((r + lr_c) / 2, up - 10), (lr_c, up), ((l + lr_c) / 2, up - 10),
+                   (l, ud_c), (lr_c, ud_c)]
+            self._gaze(*pts[0])
+            sub = 8                                 # small interpolated steps per segment
+            for (x0, y0), (x1, y1) in zip(pts, pts[1:]):
+                for i in range(1, sub + 1):
+                    f = i / sub
+                    self._set(LR, x0 + (x1 - x0) * f)
+                    self._set(UD, y0 + (y1 - y0) * f)
+                    time.sleep(0.02)
             hold = time.monotonic() + 1.0
         elif a == "schlafen":
             self._sleep_now = True
