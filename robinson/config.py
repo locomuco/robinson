@@ -129,6 +129,8 @@ class Config:
 
     # ── eyes ─────────────────────────────────────────────────────────────────
     eyes: str = "auto"                  # auto | servo | sim | off
+    eye_channels: tuple = (0, 1, 2, 3, 4, 5)   # PCA9685 channel of LR, UD, left bottom lid,
+                                        # left top lid, right bottom lid, right top lid
 
     @classmethod
     def from_env(cls) -> "Config":

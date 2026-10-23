@@ -68,7 +68,7 @@ class Robinson:
         self._vad_rebuild = False
         from .eyecal import EyeCalibration
         self.eye_cal = EyeCalibration(cfg.eyes_file)
-        self.eyes = Eyes(make_backend(cfg.eyes), self.eye_cal)
+        self.eyes = Eyes(make_backend(cfg.eyes, cfg.eye_channels), self.eye_cal)
 
         from .memory import Memory
         from .tts import Tts

@@ -65,12 +65,13 @@ def normalize_action(aktion: str, auge: str = "") -> str | None:
 
 
 class ServoBackend:
-    def __init__(self):
+    def __init__(self, channels=range(6)):
         from adafruit_servokit import ServoKit  # needs I2C + Blinka
         self.kit = ServoKit(channels=16, frequency=60)
+        self.map = list(channels)      # logical servo (LR, UD, L_BOT, L_TOP, R_BOT, R_TOP) -> PCA channel
 
     def set(self, ch: int, angle: float) -> None:
-        self.kit.servo[ch].angle = max(0.0, min(180.0, angle))
+        self.kit.servo[self.map[ch]].angle = max(0.0, min(180.0, angle))
 
 
 class SimBackend:
@@ -85,13 +86,13 @@ class SimBackend:
             log.debug("servo %d → %.0f°", ch, angle)
 
 
-def make_backend(kind: str):
+def make_backend(kind: str, channels=range(6)):
     if kind == "off":
         return None
     if kind in ("servo", "auto"):
         try:
-            backend = ServoBackend()
-            log.info("eyes: PCA9685 servo driver found")
+            backend = ServoBackend(channels)
+            log.info("eyes: PCA9685 servo driver found, channels %s", list(channels))
             return backend
         except Exception as e:
             if kind == "servo":
