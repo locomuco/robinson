@@ -27,6 +27,17 @@ def make_tools(memory: Memory, eyes: EyeCalibration | None = None, status=None,
         return (f"{_WOCHENTAG[n.weekday()]}, {n.day}. {_MONAT[n.month - 1]} {n.year}, "
                 f"{n.hour}:{n.minute:02d} Uhr")
 
+    def wetter(tage_ab_heute: int = 1, ort: str = "") -> str:
+        """Gibt die Wettervorhersage für einen Tag zurück (Temperatur, Himmel, Regen, Wind).
+
+        Args:
+          tage_ab_heute: 0 = heute, 1 = morgen, 2 = übermorgen, bis 7.
+          ort: Stadt, leer für den Standardort.
+        """
+        from .config import Config
+        from .weather import forecast
+        return forecast(ort.strip() or Config.from_env().weather_location, int(tage_ab_heute))
+
     def merken(fakt: str) -> str:
         """Speichert dauerhaft etwas, das dir ein Mensch über sich erzählt hat (Name, Vorliebe, Geburtstag). Nicht für Fragen.
 
@@ -79,7 +90,7 @@ def make_tools(memory: Memory, eyes: EyeCalibration | None = None, status=None,
 
     from .control import make_control_tools
     from .settings import make_settings_tools
-    return [uhrzeit, merken, vergessen, augen_bewegen, modell_wechseln, aktuelles_modell,
+    return [uhrzeit, wetter, merken, vergessen, augen_bewegen, modell_wechseln, aktuelles_modell,
             *(make_eye_tools(eyes) if eyes else []),
             *(make_settings_tools(settings, state_file) if settings else []),
             *make_control_tools(os.path.dirname(state_file) if state_file else ".", maint,

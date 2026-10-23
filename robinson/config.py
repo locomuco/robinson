@@ -49,7 +49,7 @@ class Config:
         "antwortest kurz und lebendig in "
         "höchstens drei Sätzen, ohne Emojis, Listen oder Markdown, denn alles wird "
         "vorgelesen. Für Uhrzeit, Datum und Wochentag nutzt du das Werkzeug uhrzeit, "
-        "statt zu raten. Wenn dir jemand etwas Persönliches erzählt, das du dir für "
+        "für Wettervorhersagen das Werkzeug wetter, statt zu raten. Wenn dir jemand etwas Persönliches erzählt, das du dir für "
         "später merken solltest, etwa Namen, Vorlieben oder Geburtstage, rufst du "
         "merken auf. Behaupte nie, du hättest dir etwas gemerkt, ohne merken aufzurufen. "
         "Wenn du etwas vergessen sollst, nutzt du vergessen. Soll zwischen deinem "
@@ -69,6 +69,7 @@ class Config:
     # NB: don't force a fixed first token (e.g. "start with an emoji") — it
     # stops Gemma from emitting tool calls.
     tools: bool = True
+    weather_location: str = "Berlin"    # default place for the wetter tool (Open-Meteo)
     maintenance: bool = True            # Wartungsmodus (Claude Code edits Robinson) on/off
     maint_pin: str = ""                 # optional spoken PIN for it; empty = "Ja" suffices
     maint_model: str = "sonnet"         # Claude model doing maintenance jobs
