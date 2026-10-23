@@ -5,7 +5,7 @@
     eye_check.py move <ch> <angle>      move one channel there slowly (1° steps) from its last angle
     eye_check.py release                stop the pulses: servos go limp
 
-Same driver settings as robinson/eyes.py (ServoKit, 60 Hz). The last angles are kept in
+Same driver settings as robinson/eyes.py (ServoKit, 60 Hz, EyeMech pulse range). The last angles are kept in
 /tmp/eye_check.json so `move` can ramp instead of jumping.
 """
 
@@ -32,7 +32,12 @@ def save(state: dict) -> None:
 
 def kit():
     from adafruit_servokit import ServoKit
-    return ServoKit(channels=16, frequency=60)
+    sys.path.insert(0, os.path.join(os.path.dirname(os.path.abspath(__file__)), ".."))
+    from robinson.eyes import SERVO_PULSE_US
+    k = ServoKit(channels=16, frequency=60)
+    for ch in range(16):
+        k.servo[ch].set_pulse_width_range(*SERVO_PULSE_US)
+    return k
 
 
 def main() -> None:

@@ -64,11 +64,17 @@ def normalize_action(aktion: str, auge: str = "") -> str | None:
     return name
 
 
+# pulse range of Will Cogley's EyeMech code (micropython-servo), so its angles apply 1:1
+SERVO_PULSE_US = (544, 2400)
+
+
 class ServoBackend:
     def __init__(self, channels=range(6)):
         from adafruit_servokit import ServoKit  # needs I2C + Blinka
         self.kit = ServoKit(channels=16, frequency=60)
         self.map = list(channels)      # logical servo (LR, UD, L_BOT, L_TOP, R_BOT, R_TOP) -> PCA channel
+        for ch in self.map:
+            self.kit.servo[ch].set_pulse_width_range(*SERVO_PULSE_US)
 
     def set(self, ch: int, angle: float) -> None:
         self.kit.servo[self.map[ch]].angle = max(0.0, min(180.0, angle))
