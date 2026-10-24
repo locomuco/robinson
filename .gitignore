@@ -16,3 +16,8 @@ robinson.env
 Module.symvers
 modules.order
 *.dtbo
+# ESP-IDF build output and downloaded components (esp-eye/)
+esp-eye/build/
+esp-eye/managed_components/
+esp-eye/sdkconfig
+esp-eye/sdkconfig.old
